@@ -5,6 +5,15 @@ use std::{
 use aws_sdk_s3::Client as S3Client;
 use walkdir::WalkDir;
 use diesel::prelude::*;
+use checksums::hash_file;
+
+// Use BLAKE2B if running on 64 bit CPU
+#[cfg(target_pointer_width = "64")]
+use checksums::Algorithm::BLAKE2B as HASH_ALGO;
+
+// Use BLAKE2S if running on 32 bit CPU or lower
+#[cfg(not(target_pointer_width = "64"))]
+use checksums::Algorithm::BLAKE2S as HASH_ALGO;
 
 use glacier_sync::{
     clear_local_state,
@@ -143,21 +152,30 @@ async fn load_from_s3(conn: &mut PgConnection, s3_client: &S3Client) {
 async fn fix_pending_uploads(conn: &mut PgConnection, s3_client: &S3Client) -> (usize, usize) {
     let mut failures: usize = 0;
     let pending_upload_files: Vec<GlacierFile> = get_pending_upload_files(conn);
-
     let length = pending_upload_files.len();
+    let mut futures = FuturesOrdered::new();
+    let mut files = Vec::with_capacity(length);
 
-    for mut file in pending_upload_files {
-        // TODO upload to glacier.
-        match s3::upsert(s3_client, BUCKET_NAME, file.file_path.clone(), file.file_path.clone()).await {
+    for file in pending_upload_files {
+        futures.push_back(s3::upsert(s3_client, BUCKET_NAME, file.file_path.clone(), file.file_path.clone()));
+        files.push(file);
+    };
+
+    let results: Vec<_> = futures.collect().await;
+
+    for i in 0..length {
+        let result = &results[i];
+
+        match result {
             Err(_) => {
                 failures += 1;
             },
             Ok(_) => {
                 // Copy file.modified to file.updated.
-                file.uploaded = Some(file.modified);
-                file.update(conn);
+                files[i].uploaded = Some(files[i].modified);
+                files[i].update(conn);
             }
-        };
+        }
     };
 
     (length - failures, failures)
@@ -167,19 +185,29 @@ async fn fix_pending_updates(conn: &mut PgConnection, s3_client: &S3Client) -> (
     let mut failures: usize = 0;
     let pending_update_files: Vec<GlacierFile> = get_pending_update_files(conn);
     let length = pending_update_files.len();
+    let mut futures = FuturesOrdered::new();
+    let mut files = Vec::with_capacity(length);
 
-    for mut file in pending_update_files {
-        // TODO Update file in glacier.
-        match s3::upsert(s3_client, BUCKET_NAME, file.file_path.clone(), file.file_path.clone()).await {
+    for file in pending_update_files {
+        futures.push_back(s3::upsert(s3_client, BUCKET_NAME, file.file_path.clone(), file.file_path.clone()));
+        files.push(file);
+    };
+
+    let results: Vec<_> = futures.collect().await;
+
+    for i in 0..length {
+        let result = &results[i];
+
+        match result {
             Err(_) => {
                 failures += 1;
             },
             Ok(_) => {
                 // Copy file.modified to file.updated.
-                file.uploaded = Some(file.modified);
-                file.update(conn);
+                files[i].uploaded = Some(files[i].modified);
+                files[i].update(conn);
             }
-        };
+        }
     };
 
     (length - failures, failures)
@@ -189,18 +217,27 @@ async fn fix_pending_deletes(conn: &mut PgConnection, s3_client: &S3Client) -> (
     let mut failures: usize = 0;
     let pending_delete_files: Vec<GlacierFile> = get_pending_delete_files(conn);
     let length = pending_delete_files.len();
+    let mut futures = FuturesOrdered::new();
+    let mut files = Vec::with_capacity(length);
 
     for file in pending_delete_files {
-        // Delete from glacier.
-        match s3::delete(s3_client, BUCKET_NAME, &file.file_path).await {
+        futures.push_back(s3::delete(s3_client, BUCKET_NAME, file.file_path.clone()));
+        files.push(file);
+    };
+    
+    let results: Vec<_> = futures.collect().await;
+
+    for i in 0..length {
+        let result = &results[i];
+
+        match result {
             Err(_) => {
                 failures += 1;
             },
             Ok(_) => {
-                // Copy file.modified to file.updated.
-                file.delete(conn);
+                files[i].delete(conn);
             }
-        };
+        }
     };
 
     (length - failures, failures)
@@ -252,27 +289,37 @@ async fn update_changed_files(conn: &mut PgConnection, s3_client: &S3Client) -> 
     let mut failures: usize = 0;
     let updated_files: Vec<LocalFile> = get_changed_files(conn);
     let length = updated_files.len();
+    let mut futures = FuturesOrdered::new();
+    let mut files = Vec::with_capacity(length);
 
     for file in updated_files {
         // Copy from local_state to glacier state, leaving uploaded as it was.
-        let mut file = GlacierFile {
+        let file = GlacierFile {
             file_path: file.file_path,
             modified: file.modified,
             uploaded: None,
             pending_delete: false
         }.update(conn);
 
-        // Upload to glacier.
-        match s3::upsert(s3_client, BUCKET_NAME, file.file_path.clone(), file.file_path.clone()).await {
+        futures.push_back(s3::upsert(s3_client, BUCKET_NAME, file.file_path.clone(), file.file_path.clone()));
+        files.push(file);
+    };
+    
+    let results: Vec<_> = futures.collect().await;
+
+    for i in 0..length {
+        let result = &results[i];
+
+        match result {
             Err(_) => {
                 failures += 1;
             },
             Ok(_) => {
                 // Copy file.modified to file.updated.
-                file.uploaded = Some(file.modified);
-                file.update(conn);
+                files[i].uploaded = Some(files[i].modified);
+                files[i].update(conn);
             }
-        };
+        }
     };
 
     (length - failures, failures)
@@ -282,22 +329,32 @@ async fn delete_missing_files(conn: &mut PgConnection, s3_client: &S3Client) -> 
     let mut failures: usize = 0;
     let deleted_files: Vec<GlacierFile> = get_missing_files(conn);
     let length = deleted_files.len();
+    let mut futures = FuturesOrdered::new();
+    let mut files = Vec::with_capacity(length);
 
     for mut file in deleted_files {
         // Set pending_delete to TRUE.
         file.pending_delete = true;
         file.update(conn);
 
-        // Add delete marker.
-        match s3::delete(s3_client, BUCKET_NAME, &file.file_path).await {
+        futures.push_back(s3::delete(s3_client, BUCKET_NAME, file.file_path.clone()));
+        files.push(file);
+    };
+    
+    let results: Vec<_> = futures.collect().await;
+
+    for i in 0..length {
+        let result = &results[i];
+
+        match result {
             Err(_) => {
                 failures += 1;
             },
             Ok(_) => {
                 // Delete from glacier_state
-                file.delete(conn);
+                files[i].delete(conn);
             }
-        };
+        }
     };
 
     (length - failures, failures)

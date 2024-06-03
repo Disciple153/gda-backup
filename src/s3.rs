@@ -41,7 +41,7 @@ pub async fn upsert(
         .await
 }
 
-pub async fn delete(client: &Client, bucket: &str, key: &str) -> Result<(), Error> {
+pub async fn delete(client: &Client, bucket: &str, key: String) -> Result<(), Error> {
     client
         .delete_object()
         .bucket(bucket)
