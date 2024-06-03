@@ -1,14 +1,10 @@
 # TODO
 
 ## Road map
-- Document functions
-- Keep track of:
-    - failures
-    - uploads
-    - updates
-    - deletions
-- Implement dry run
 - Properly implement async
+- Document functions
+- Implement dry run
+- Use regex to filter out files from being backed up
 - Encryption
 - Environment variables
     - AWS credentials
@@ -18,9 +14,12 @@
     - DB_PASSWORD
     - DB_HOST
     - DB_DB
+    - DRY_RUN
+    - TARGET_DIR
 - Docker
     - image
     - compose file
+- Document recommended bucket settings
 
 ## Stretch
 - Use hashes instead of file names

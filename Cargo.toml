@@ -10,5 +10,6 @@ aws-config = "1.5.0"
 aws-sdk-s3 = "1.30.0"
 diesel = {version = "*", features = ["postgres"]}
 dotenvy = "0.15.7"
+futures = "0.3.30"
 tokio = { version = "1.37.0", features = ["full"] }
 walkdir = "2.5.0"

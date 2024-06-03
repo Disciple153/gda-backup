@@ -28,10 +28,10 @@ pub async fn get_client() -> Client {
 pub async fn upsert(
     client: &Client,
     bucket_name: &str,
-    file_name: &str,
-    key: &str,
+    file_name: String,
+    key: String,
 ) -> Result<PutObjectOutput, SdkError<PutObjectError>> {
-    let body = ByteStream::from_path(Path::new(file_name)).await;
+    let body = ByteStream::from_path(Path::new(&file_name)).await;
     client
         .put_object()
         .bucket(bucket_name)

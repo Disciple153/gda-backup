@@ -6,4 +6,4 @@ file = "src/schema.rs"
 custom_type_derives = ["diesel::query_builder::QueryId", "Clone"]
 
 [migrations_directory]
-dir = "/home/disciple153/documents/homelab-tf/glacier_sync/migrations"
+dir = "/home/disciple153/documents/gda-backup/migrations"

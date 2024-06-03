@@ -56,10 +56,18 @@ pub fn clear_glacier_state(conn: &mut PgConnection) {
         .expect("Error clearing glacier_state.");
 }
 
-pub fn get_pending_upsert_files(conn: &mut PgConnection) -> Vec<GlacierFile> {
+pub fn get_pending_upload_files(conn: &mut PgConnection) -> Vec<GlacierFile> {
     glacier_state
         .filter(glacier_uploaded.is_null())
-        .or_filter(glacier_modified.nullable().ne(glacier_uploaded))
+        .select(GlacierFile::as_select())
+        .load(conn)
+        .expect("Error getting pending upserts.")
+}
+
+pub fn get_pending_update_files(conn: &mut PgConnection) -> Vec<GlacierFile> {
+    glacier_state
+        .filter(glacier_uploaded.is_not_null())
+        .filter(glacier_modified.nullable().ne(glacier_uploaded))
         .select(GlacierFile::as_select())
         .load(conn)
         .expect("Error getting pending upserts.")
