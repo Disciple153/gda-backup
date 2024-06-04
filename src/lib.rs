@@ -25,7 +25,6 @@ use crate::schema::local_state::dsl::{
 };
 
 joinable!(crate::schema::local_state -> crate::schema::glacier_state (file_path));
-// allow_tables_to_appear_in_same_query!(glacier_state, local_state);
 
 pub fn establish_connection(args: &Args) -> PgConnection {
     dotenv().ok();
