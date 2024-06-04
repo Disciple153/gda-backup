@@ -27,7 +27,7 @@ pub async fn get_client() -> Client {
 
 pub async fn upsert(
     client: &Client,
-    bucket_name: &str,
+    bucket_name: String,
     file_name: String,
     key: String,
 ) -> Result<PutObjectOutput, SdkError<PutObjectError>> {
@@ -41,7 +41,7 @@ pub async fn upsert(
         .await
 }
 
-pub async fn delete(client: &Client, bucket: &str, key: String) -> Result<(), Error> {
+pub async fn delete(client: &Client, bucket: String, key: String) -> Result<(), Error> {
     client
         .delete_object()
         .bucket(bucket)
@@ -54,7 +54,7 @@ pub async fn delete(client: &Client, bucket: &str, key: String) -> Result<(), Er
     Ok(())
 }
 
-pub fn list(client: &Client, bucket: &str) -> ListObjectsV2Paginator {
+pub fn list(client: &Client, bucket: String) -> ListObjectsV2Paginator {
     client
         .list_objects_v2()
         .bucket(bucket.to_owned())

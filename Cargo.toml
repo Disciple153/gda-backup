@@ -8,7 +8,9 @@ edition = "2021"
 [dependencies]
 aws-config = "1.5.0"
 aws-sdk-s3 = "1.30.0"
+aws-smithy-runtime-api = "1.6.2"
 checksums = "0.9.1"
+clap = { version = "4.5.4", features = ["derive"] }
 diesel = {version = "*", features = ["postgres"]}
 dotenvy = "0.15.7"
 futures = "0.3.30"

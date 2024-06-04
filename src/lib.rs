@@ -1,9 +1,14 @@
 pub mod models;
 pub mod schema;
+pub mod backup;
+pub mod restore;
+pub mod s3;
+pub mod environment;
 
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use dotenvy::dotenv;
+use environment::Args;
 use models::{GlacierFile, LocalFile};
 
 use crate::schema::glacier_state::dsl::{
@@ -19,19 +24,19 @@ use crate::schema::local_state::dsl::{
     modified as local_modified,
 };
 
-const DB_ENGINE: &str = "postgres";
-const DB_USER: &str = "username";
-const DB_PASSWORD: &str = "password";
-const DB_HOST: &str = "localhost";
-const DB_DB: &str = "backup_state";
-
 joinable!(crate::schema::local_state -> crate::schema::glacier_state (file_path));
 // allow_tables_to_appear_in_same_query!(glacier_state, local_state);
 
-pub fn establish_connection() -> PgConnection {
+pub fn establish_connection(args: &Args) -> PgConnection {
     dotenv().ok();
 
-    let db_url: String = format!("{DB_ENGINE}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_DB}");
+    let db_engine = args.db_engine.clone();
+    let db_user = args.db_user.clone();
+    let db_password = args.db_password.clone();
+    let db_host = args.db_host.clone();
+    let db_name = args.db_name.clone();
+
+    let db_url: String = format!("{db_engine}://{db_user}:{db_password}@{db_host}/{db_name}");
     PgConnection::establish(&db_url)
         .unwrap_or_else(|_| panic!("Error connecting to {}", db_url))
 }
