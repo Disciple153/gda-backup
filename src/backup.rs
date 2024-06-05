@@ -52,7 +52,7 @@ pub async fn fix_pending_uploads(args: &Args, conn: &mut PgConnection, s3_client
         return (length, 0)
     }
 
-    let failures: usize = complete_upsert(args, conn, s3_client, dynamo_client, &mut pending_upload_files).await;
+    let failures: usize = complete_put(args, conn, s3_client, dynamo_client, &mut pending_upload_files).await;
 
     (length - failures, failures)
 }
@@ -65,7 +65,7 @@ pub async fn fix_pending_updates(args: &Args, conn: &mut PgConnection, s3_client
         return (length, 0)
     }
 
-    let failures: usize = complete_upsert(args, conn, s3_client, dynamo_client, &mut pending_update_files).await;
+    let failures: usize = complete_put(args, conn, s3_client, dynamo_client, &mut pending_update_files).await;
 
     (length - failures, failures)
 }
@@ -103,7 +103,7 @@ pub async fn upload_new_files(args: &Args, conn: &mut PgConnection, s3_client: &
         }.insert(conn));
     };
 
-    let failures: usize = complete_upsert(args, conn, s3_client, dynamo_client, &mut glacier_files).await;
+    let failures: usize = complete_put(args, conn, s3_client, dynamo_client, &mut glacier_files).await;
 
     (length - failures, failures)
 }
@@ -128,7 +128,7 @@ pub async fn update_changed_files(args: &Args, conn: &mut PgConnection, s3_clien
         };
     };
     
-    let failures: usize = complete_upsert(args, conn, s3_client, dynamo_client, &mut glacier_files).await;
+    let failures: usize = complete_put(args, conn, s3_client, dynamo_client, &mut glacier_files).await;
 
     (length - failures, failures)
 }
@@ -158,51 +158,95 @@ struct HashJob {
     file: GlacierFile,
 }
 
-async fn complete_upsert(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoClient, files: &mut Vec<GlacierFile>) -> usize {
+async fn complete_put<'a>(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoClient, files: &mut Vec<GlacierFile>) -> usize {
 
     let mut failures = 0;
 
-    // Build S3 upsert jobs for every file to be upserted.
+    let mut get_hash_trackers = FuturesOrdered::new();
+    let mut new_hashes = Vec::new();
+
+    // COMPUTE HASHES
+    for file in &mut *files {
+
+        let new_hash = hash_file(Path::new(&file.file_path), HASH_ALGO);
+        // TODO Batch this.
+        get_hash_trackers.push_back( HashTracker::get(
+            dynamo_client,
+            args.dynamo_table.clone(),
+            new_hash.clone()
+        ));
+
+        new_hashes.push(new_hash);
+    };
+    
+    // GET HASH_TRACKERS
+    let results: Vec<_> = get_hash_trackers.collect().await;
+    let mut i = 0;
+
+    // DECLARE JOB ORGANIZERS
 
     // File will be uploaded for the first time
     let mut s3_upload = FuturesOrdered::new();
     let mut s3_upload_post = Vec::new();
 
     // File was previously uploaded and deleted, but has expired
-    let mut s3_update = FuturesOrdered::new();
-    let mut s3_update_post = Vec::new();
+    let mut s3_reupload = FuturesOrdered::new();
+    let mut s3_reupload_post = Vec::new();
 
     // File was previously uploaded and was deleted
     let mut s3_undelete = FuturesOrdered::new();
     let mut s3_undelete_post = Vec::new();
 
     // File was previously uploaded and is still active
-    let mut no_upload_post = Vec::new();
+    let mut no_upload_add_filenames = FuturesOrdered::new();
+    let mut no_upload_del_filenames = Vec::new();
+    let mut no_upload_local_updates = Vec::new();
 
     let mut hash_jobs: &mut Vec<HashJob>;
 
+    // SORT FILES INTO JOB ORGANIZERS
     for file in files {
+        let new_hash = &new_hashes[i];
+        let result = &results[i];
+        i += 1;
 
-        let new_hash = hash_file(Path::new(&file.file_path), HASH_ALGO);
-        let hash_tracker_result = HashTracker::get(
-            dynamo_client,
-            args.dynamo_table.clone(),
-            new_hash.clone()).await;
-
-        match hash_tracker_result {
+        match result {
             // If there was an active version at one point
-            Ok(mut hash_tracker) => {
+            Ok(hash_tracker) => {
 
+                let mut h_t = hash_tracker.clone();
+
+                // If there are active versions
+                if h_t.has_files() {
+
+                    // Add filename to new dynamodb hash entry
+                    h_t.add_file_name(file.file_path.clone());
+                    no_upload_add_filenames.push_back(hash_tracker.put(dynamo_client, args.dynamo_table.clone()));
+
+                    // Remove filename from old dynamo hash entry
+                    no_upload_del_filenames.push(HashTracker::del_file_name_remote(
+                        dynamo_client,
+                        args.dynamo_table.clone(),
+                        file.file_hash.clone(),
+                        file.file_path.clone()
+                    ));
+
+                    // Update local database
+                    file.file_hash = Some(h_t.hash.clone());
+                    file.uploaded = Some(file.modified);
+                    no_upload_local_updates.push(file);
+                }
+                
                 // If there is no active version for the hash
-                if hash_tracker.file_names.len() == 0 {
+                else {
                     
                     // If all inactive versions have expired
-                    if hash_tracker.expiration < Utc::now() {
-                        hash_jobs = &mut s3_update_post;
-                        s3_update.push_back(s3::put(s3_client, 
+                    if h_t.expiration < Utc::now() {
+                        hash_jobs = &mut s3_reupload_post;
+                        s3_reupload.push_back(s3::put(s3_client, 
                             args.bucket_name.clone(), 
                             file.file_path.clone(),
-                            hash_tracker.hash.clone()
+                            h_t.hash.clone()
                         ));
 
                         let expiration = match Utc::now().checked_add_signed(Duration::days(args.min_storage_duration)) {
@@ -210,7 +254,7 @@ async fn complete_upsert(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
                             None => DateTime::UNIX_EPOCH,
                         };
 
-                        hash_tracker.expiration = expiration;
+                        h_t.expiration = expiration;
                     }
 
                     // If there are inactive versions that have not expired
@@ -218,22 +262,19 @@ async fn complete_upsert(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
                         hash_jobs = &mut s3_undelete_post;
                         s3_undelete.push_back(s3::undelete(s3_client,
                             args.bucket_name.clone(),
-                            hash_tracker.hash.clone()
+                            h_t.hash.clone()
                         ));
-                    }
-                }
+                    };
 
-                // If there are active versions
-                else {
-                    hash_jobs = &mut no_upload_post;
-                }
+                    h_t.add_file_name(file.file_path.clone());
+                    file.file_hash = Some(hash_tracker.hash.clone());
+                    file.uploaded = Some(file.modified);
 
-                file.uploaded = Some(file.modified);
-
-                (*hash_jobs).push(HashJob {
-                    hash_tracker,
-                    file: file.clone(),
-                });
+                    (*hash_jobs).push(HashJob {
+                        hash_tracker: hash_tracker.clone(),
+                        file: file.clone(),
+                    });
+                };
             },
 
             // If this is the first time this file has been uploaded
@@ -243,12 +284,10 @@ async fn complete_upsert(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
                     None => DateTime::UNIX_EPOCH,
                 };
 
-                let hash_tracker = HashTracker {
-                    hash: new_hash,
-                    file_names: vec![file.file_path.clone()],
-                    expiration,
-                };
-
+                let mut hash_tracker = HashTracker::new (new_hash.to_string(), expiration, file.file_path.clone());
+                
+                hash_tracker.add_file_name(file.file_path.clone());
+                file.file_hash = Some(hash_tracker.hash.clone());
                 file.uploaded = Some(file.modified);
 
                 s3_upload.push_back(s3::put(s3_client, 
@@ -265,25 +304,55 @@ async fn complete_upsert(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
         };
     };
 
-
     // NO UPLOAD
-    let hash_futures = FuturesUnordered::new();
 
-    for hash_job in &mut no_upload_post {
-        let h_job = hash_job.clone();
+    let results: Vec<_> = no_upload_add_filenames.collect().await;
+    let mut no_upload_del_filename_futures = FuturesOrdered::new();
+    let mut i = 0;
 
-        hash_futures.push(hash_job.hash_tracker.move_filename_from(
-            dynamo_client, 
-            args.dynamo_table.clone(), 
-            hash_job.file.file_path.clone(), 
-            hash_job.file.file_hash.clone()
-        ));
+    for no_upload_del_filename in no_upload_del_filenames {
+        dbg!("File Moved. Creating reference...");
         
-        hash_job.file.file_hash = Some(h_job.hash_tracker.hash);
-        hash_job.file.update(conn);
-    }
+        let result = &results[i];
+        i += 1;
 
-    let _: Vec<_> = hash_futures.collect().await;
+        match result {
+            Ok(_) => {
+                no_upload_del_filename_futures.push_back(no_upload_del_filename);
+            },
+            Err(error) => {
+                dbg!(error);
+                failures += 1;
+            },
+        };
+
+    };
+
+    let results: Vec<_> = no_upload_del_filename_futures.collect().await;
+    let mut i = 0;
+
+    for no_upload_local_update in no_upload_local_updates {
+        
+        let result = &results[i];
+        i += 1;
+
+        match result {
+            Ok(_) => {
+                no_upload_local_update.update(conn);
+            },
+            Err(error) => {
+                match error {
+                    crate::dynamodb::HashTrackerError::NotFoundError(_) => {
+                        no_upload_local_update.update(conn);
+                    },
+                    error => {
+                        dbg!(error);
+                        failures += 1;
+                    }
+                };
+            },
+        };
+    };
 
     // UNDELETE
     let hash_futures = FuturesUnordered::new();
@@ -291,20 +360,14 @@ async fn complete_upsert(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
     let mut i = 0;
 
     for hash_job in &mut s3_undelete_post {
+        dbg!("File undeleted. Undeleting file...");
+
         let result = &results[i];
-        let h_job = hash_job.clone();
         i += 1;
 
         match result {
             Ok(_) => {
-                hash_futures.push(hash_job.hash_tracker.move_filename_from(
-                    dynamo_client, 
-                    args.dynamo_table.clone(), 
-                    hash_job.file.file_path.clone(), 
-                    hash_job.file.file_hash.clone()
-                ));
-
-                hash_job.file.file_hash = Some(h_job.hash_tracker.hash);
+                hash_futures.push(hash_job.hash_tracker.put(dynamo_client, args.dynamo_table.clone()));
                 hash_job.file.update(conn);
             },
             Err(_) => {
@@ -325,23 +388,18 @@ async fn complete_upsert(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
     let mut i = 0;
 
     for hash_job in &mut s3_upload_post {
+        dbg!("File created. Putting new file...");
+
         let result = &results[i];
-        let h_job = hash_job.clone();
         i += 1;
 
         match result {
             Ok(_) => {
-                hash_futures.push(hash_job.hash_tracker.move_filename_from(
-                    dynamo_client, 
-                    args.dynamo_table.clone(), 
-                    hash_job.file.file_path.clone(), 
-                    hash_job.file.file_hash.clone()
-                ));
-
-                hash_job.file.file_hash = Some(h_job.hash_tracker.hash);
+                hash_futures.push(hash_job.hash_tracker.put(dynamo_client, args.dynamo_table.clone()));
                 hash_job.file.update(conn);
             },
-            Err(_) => {
+            Err(error) => {
+                dbg!(error);
                 failures += 1;
             }
         }
@@ -349,29 +407,24 @@ async fn complete_upsert(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
 
     let _: Vec<_> = hash_futures.collect().await;
 
-    // UPDATE
+    // REUPLOAD
     let hash_futures = FuturesUnordered::new();
-    let results: Vec<_> = s3_update.collect().await;
+    let results: Vec<_> = s3_reupload.collect().await;
     let mut i = 0;
 
-    for hash_job in &mut s3_update_post {
+    for hash_job in &mut s3_reupload_post {
+        dbg!("File recreated. Putting new file...");
+
         let result = &results[i];
-        let h_job = hash_job.clone();
         i += 1;
 
         match result {
             Ok(_) => {
-                hash_futures.push(hash_job.hash_tracker.move_filename_from(
-                    dynamo_client, 
-                    args.dynamo_table.clone(), 
-                    hash_job.file.file_path.clone(), 
-                    hash_job.file.file_hash.clone()
-                ));
-
-                hash_job.file.file_hash = Some(h_job.hash_tracker.hash);
+                hash_futures.push(hash_job.hash_tracker.put(dynamo_client, args.dynamo_table.clone()));
                 hash_job.file.update(conn);
             },
-            Err(_) => {
+            Err(error) => {
+                dbg!(error);
                 failures += 1;
             }
         }
@@ -386,50 +439,61 @@ async fn complete_delete(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
 
     let mut failures = 0;
 
-    // Build S3 delete jobs for every file to be deleted.
+    // File was deleted, and there are no references to the file's hash in DynamoDB
     let mut s3_delete = FuturesOrdered::new();
     let mut s3_delete_post = Vec::new();
 
+    // File was deleted, but there was an error when getting the file's hash in DynamoDB
     let mut s3_delete_error = FuturesOrdered::new();
     let mut s3_delete_error_files = Vec::new();
 
+    // File was deleted, but there is still at least one reference to the file's hash in DynamoDB
+    let mut no_delete_post = Vec::new();
+
     for file in files {
 
-        let Some(hash) = file.file_hash.clone() else { continue; };
+        let hash = match file.file_hash.clone() {
+            Some(value) => value,
+            None => {
+                file.delete(conn);
+                continue;
+            },
+        };
 
         let hash_tracker_result = HashTracker::get(dynamo_client, args.dynamo_table.clone(), hash.clone()).await;
 
         match hash_tracker_result {
+
+            // If the file's hash was found in DynamoDB
             Ok(mut hash_tracker) => {
-                let index_result = hash_tracker.file_names.iter().position(|x| *x == file.file_path.clone());
 
-                match index_result {
-                    Some(index) => {
-                        hash_tracker.file_names.remove(index);
+                // Remove the file path from the hash_tracker
+                hash_tracker.del_file_name(file.file_path.clone());
 
-                        s3_delete.push_back(s3::delete(
-                            s3_client,
-                            args.bucket_name.clone(),
-                            hash.clone()
-                        ));
+                // If there were other files referenced by the DynamoDB entry
+                if hash_tracker.has_files() {
+                    no_delete_post.push(HashJob {
+                        hash_tracker,
+                        file: file.clone(),
+                    });
+                }
 
-                        s3_delete_post.push(HashJob {
-                            hash_tracker,
-                            file: file.clone(),
-                        });
-                    },
+                // If the file was the only file referenced by the DynamoDB entry
+                else {
+                    s3_delete.push_back(s3::delete(
+                        s3_client,
+                        args.bucket_name.clone(),
+                        hash.clone()
+                    ));
 
-                    None => {
-                        s3_delete_error_files.push(file);
-                        s3_delete_error.push_back(s3::delete(
-                            s3_client,
-                            args.bucket_name.clone(),
-                            hash.clone()
-                        ));
-                    },
+                    s3_delete_post.push(HashJob {
+                        hash_tracker,
+                        file: file.clone(),
+                    });
                 };
-
             },
+
+            // If the file's hash was not found in DynamoDB
             Err(_) => {
                 s3_delete_error_files.push(file);
                 s3_delete_error.push_back(s3::delete(
@@ -441,6 +505,17 @@ async fn complete_delete(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
         };
     };
 
+    // NO DELETE
+    let hash_futures = FuturesUnordered::new();
+
+    for hash_job in &mut no_delete_post {
+        dbg!("File moved. Deleting reference...");
+
+        hash_futures.push(hash_job.hash_tracker.put(dynamo_client, args.dynamo_table.clone()));
+        hash_job.file.delete(conn);
+    }
+
+    let _: Vec<_> = hash_futures.collect().await;
 
     // DELETE NORMALLY
     let hash_futures_delete = FuturesUnordered::new();
@@ -449,6 +524,8 @@ async fn complete_delete(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
     let mut i = 0;
 
     for hash_job in &mut s3_delete_post {
+        dbg!("File deleted. Putting delete marker...");
+
         let result = &results[i];
         i += 1;
 
@@ -456,7 +533,7 @@ async fn complete_delete(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
             Ok(_) => {
 
                 // If at least one version of the file will exist after deletion, update the dynamo entry
-                if hash_job.hash_tracker.file_names.len() == 0 && hash_job.hash_tracker.expiration < Utc::now() {
+                if !hash_job.hash_tracker.has_files() && hash_job.hash_tracker.expiration < Utc::now() {
                     hash_futures_delete.push(hash_job.hash_tracker.delete(
                         dynamo_client,
                         args.dynamo_table.clone()
@@ -473,7 +550,8 @@ async fn complete_delete(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
 
                 hash_job.file.delete(conn);
             },
-            Err(_) => {
+            Err(error) => {
+                dbg!(error);
                 failures += 1;
             }
         }
@@ -483,20 +561,24 @@ async fn complete_delete(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
     let _: Vec<_> = hash_futures_update.collect().await;
 
     // DELETE WITH DB ERRORS
-    let length = s3_delete_error.len();
     let results: Vec<_> = s3_delete_error.collect().await;
+    let mut i = 0;
 
     // Modify the database according to the results
-    for i in 0..length {
+    for file in s3_delete_error_files {
+        dbg!("File deleted with database error. Removing from local database...");
+
         let result = &results[i];
+        i += 1;
 
         match result {
-            Err(_) => {
-                failures += 1;
-            },
             Ok(_) => {
                 // Delete from glacier_state
-                s3_delete_error_files[i].delete(conn);
+                file.delete(conn);
+            },
+            Err(error) => {
+                dbg!(error);
+                failures += 1;
             }
         }
     };

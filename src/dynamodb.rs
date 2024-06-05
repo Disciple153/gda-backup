@@ -2,6 +2,7 @@ use chrono::{
     DateTime,
     Utc,
 };
+use ordered_vec::OrdVec;
 
 use crate::aws;
 
@@ -18,6 +19,7 @@ use thiserror::Error;
 const HASH_KEY: &str = "hash";
 const FILE_NAMES_KEY: &str = "file_names";
 const EXPIRATION_KEY: &str = "expiration";
+const NONE_STR: &str = "NONE";
 
 #[derive(Error, Debug)]
 pub enum HashTrackerError {
@@ -32,6 +34,9 @@ pub enum HashTrackerError {
 
     #[error("DynamoDbGetItemError")]
     DynamoDbGetItemError(String),
+    
+    #[error("NotFoundError")]
+    NotFoundError(String),
 }
 
 
@@ -43,11 +48,21 @@ pub async fn get_client() -> Client {
 #[derive(Clone)]
 pub struct HashTracker {
     pub hash: String,
-    pub file_names: Vec<String>,
     pub expiration: DateTime<Utc>,
+    file_names: Vec<String>,
 }
 
 impl HashTracker {
+
+    pub fn new(hash: String, expiration: DateTime<Utc>, file_name: String) -> HashTracker { 
+
+        HashTracker {
+            hash,
+            expiration,
+            file_names: vec![file_name],
+        }
+    }
+
     pub async fn get(client: &Client, table_name: String, hash: String) -> Result<HashTracker, HashTrackerError> {
         let empty_vec = vec![];
 
@@ -70,20 +85,32 @@ impl HashTracker {
             Err(_) => DateTime::UNIX_EPOCH,
         };
 
-        let hash_tracker = HashTracker {
+        let mut hash_tracker = HashTracker {
             hash,
             file_names: file_names.clone(),
             expiration,
         };
 
+        hash_tracker.del_file_name(NONE_STR.to_string());
+
         Ok(hash_tracker)
     }
 
     pub async fn put(&self, client: &Client, table_name: String) -> Result<PutItemOutput, HashTrackerError> {
+
+        let file_names;
+
+        if self.has_files() {
+            file_names = self.file_names.clone();
+        }
+        else {
+            file_names = vec![NONE_STR.to_string()];
+        }
+
         let response = client.put_item()
             .table_name(table_name)
             .item(HASH_KEY, AttributeValue::S(self.hash.clone()))
-            .item(FILE_NAMES_KEY, AttributeValue::Ss(self.file_names.clone()))
+            .item(FILE_NAMES_KEY, AttributeValue::Ss(file_names))
             .item(EXPIRATION_KEY, AttributeValue::S(self.expiration.to_string()))
             .send().await?;
 
@@ -99,24 +126,69 @@ impl HashTracker {
         Ok(response)
     }
 
-    pub async fn move_filename_from(&mut self, client: &Client, table_name: String, file_name: String, old_hash: Option<String>) -> Result<bool, HashTrackerError> {
+    pub fn add_file_name(&mut self, file_name: String) {
         
-        self.file_names.push(file_name.clone());
-        self.put(client, table_name.clone()).await?;
+        match self.file_names.iter().position(|x| *x == file_name) {
 
-        let Some(old_hash) = old_hash else { return Ok(false) };
-        let Ok(mut old) = HashTracker::get(client, table_name.clone(), old_hash).await else { return Ok(false) };
-        let Some(index) = old.file_names.iter().position(|x| *x == file_name) else { return Ok(false) };
+            // If file_name is already in file_names
+            Some(_) => (),
 
-        old.file_names.remove(index);
+            // If file_name is not in file_names
+            None => {
+                let _ = self.file_names.push_ord_ascending(file_name);
+            },
+        };
+    }
 
-        if old.file_names.len() == 0 && old.expiration < Utc::now() {
-            let _ = old.delete(client, table_name.clone()).await;
-        }
-        else {
-            let _ = old.put(client, table_name.clone()).await;
+    pub fn del_file_name(&mut self, file_name: String) {
+        match self.file_names.iter().position(|x| *x == file_name) {
+
+            // If file_name is already in file_names
+            Some(index) => {
+                self.file_names.remove(index);
+            },
+
+            // If file_name is not in file_names
+            None => (),
+        };
+    }
+
+    pub async fn del_file_name_remote(client: &Client, table_name: String, hash: Option<String>, file_name: String) -> Result<PutItemOutput, HashTrackerError>  {
+        let Some(hash) = hash else { 
+            return Err(HashTrackerError::NotFoundError("No hash provided.".to_string())) 
         };
 
-        Ok(old.file_names.len() == 0)
+        let Ok(mut hash_tracker) = HashTracker::get(client, table_name.clone(), hash).await else { 
+            return Err(HashTrackerError::NotFoundError("HashTracker not found.".to_string())) 
+        };
+
+        hash_tracker.del_file_name(file_name);
+        
+        hash_tracker.put(client, table_name).await
     }
+
+    pub fn has_files(&self) -> bool {
+        self.file_names.len() > 0
+    }
+
+    // pub async fn move_filename_from(&mut self, client: &Client, table_name: String, file_name: String, old_hash: Option<String>) -> Result<bool, HashTrackerError> {
+        
+    //     self.file_names.push(file_name.clone());
+    //     self.put(client, table_name.clone()).await?;
+
+    //     let Some(old_hash) = old_hash else { return Ok(false) };
+    //     let Ok(mut old) = HashTracker::get(client, table_name.clone(), old_hash).await else { return Ok(false) };
+    //     let Some(index) = old.file_names.iter().position(|x| *x == file_name) else { return Ok(false) };
+
+    //     old.file_names.remove(index);
+
+    //     if old.file_names.len() == 0 && old.expiration < Utc::now() {
+    //         let _ = old.delete(client, table_name.clone()).await;
+    //     }
+    //     else {
+    //         let _ = old.put(client, table_name.clone()).await;
+    //     };
+
+    //     Ok(old.file_names.len() == 0)
+    // }
 }

@@ -74,7 +74,7 @@ pub fn get_pending_upload_files(conn: &mut PgConnection) -> Vec<GlacierFile> {
         .filter(glacier_uploaded.is_null())
         .select(GlacierFile::as_select())
         .load(conn)
-        .expect("Error getting pending upserts.")
+        .expect("Error getting pending uploads.")
 }
 
 pub fn get_pending_update_files(conn: &mut PgConnection) -> Vec<GlacierFile> {
@@ -83,7 +83,7 @@ pub fn get_pending_update_files(conn: &mut PgConnection) -> Vec<GlacierFile> {
         .filter(glacier_modified.nullable().ne(glacier_uploaded))
         .select(GlacierFile::as_select())
         .load(conn)
-        .expect("Error getting pending upserts.")
+        .expect("Error getting pending updates.")
 }
 
 pub fn get_pending_delete_files(conn: &mut PgConnection) -> Vec<GlacierFile> {
@@ -91,7 +91,7 @@ pub fn get_pending_delete_files(conn: &mut PgConnection) -> Vec<GlacierFile> {
         .filter(pending_delete)
         .select(GlacierFile::as_select())
         .load(conn)
-        .expect("Error getting pending deletions.")
+        .expect("Error getting pending deletes.")
 }
 
 pub fn get_new_files(conn: &mut PgConnection) -> Vec<LocalFile> {

@@ -21,7 +21,6 @@ pub struct GlacierFile {
 #[derive(Clone)]
 pub struct LocalFile {
     pub file_path: String,
-    // pub file_hash: Bytea,
     pub modified: SystemTime,
 }
 

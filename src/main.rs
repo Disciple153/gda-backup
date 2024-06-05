@@ -45,7 +45,7 @@ async fn main() -> Result<(), Error> {
     // GET CONNECTIONS
     let conn: &mut PgConnection = &mut establish_connection(args);
     let s3_client: &mut S3Client = &mut s3::get_client().await;
-    let dynamo_cient: &mut DynamoClient = &mut dynamodb::get_client().await;
+    let dynamo_client: &mut DynamoClient = &mut dynamodb::get_client().await;
 
     // LOAD STATE 
 
@@ -71,34 +71,34 @@ async fn main() -> Result<(), Error> {
     // UPLOAD NEW FILES
 
     // Upload all new files
-    let (successes, failures) = upload_new_files(args, conn, s3_client, dynamo_cient).await;
+    let (successes, failures) = upload_new_files(args, conn, s3_client, dynamo_client).await;
     successful_uploads += successes;
     failed_uploads += failures;
     
     // Update all changed files
-    let (successes, failures) = update_changed_files(args, conn, s3_client, dynamo_cient).await;
+    let (successes, failures) = update_changed_files(args, conn, s3_client, dynamo_client).await;
     successful_updates += successes;
     failed_updates += failures;
     
     // Add delete markers to missing files
-    let (successes, failures) = delete_missing_files(args, conn, s3_client, dynamo_cient).await;
+    let (successes, failures) = delete_missing_files(args, conn, s3_client, dynamo_client).await;
     successful_deletes += successes;
     failed_deletes += failures;
     
     // FIX PENDING BACKUPS
 
     // Upload all files in glacier state with null uploaded rows
-    let (successes, failures) = fix_pending_uploads(args, conn, s3_client, dynamo_cient).await;
+    let (successes, failures) = fix_pending_uploads(args, conn, s3_client, dynamo_client).await;
     successful_uploads += successes;
     failed_uploads += failures;
 
     // Upsert all files in glacier state with mismatched modified and uploaded rows
-    let (successes, failures) = fix_pending_updates(args, conn, s3_client, dynamo_cient).await;
+    let (successes, failures) = fix_pending_updates(args, conn, s3_client, dynamo_client).await;
     successful_updates += successes;
     failed_updates += failures;
     
     // Delete all files in glacier pending deletion
-    let (successes, failures) = fix_pending_deletes(args, conn, s3_client, dynamo_cient).await;
+    let (successes, failures) = fix_pending_deletes(args, conn, s3_client, dynamo_client).await;
     successful_deletes += successes;
     failed_deletes += failures;
     
