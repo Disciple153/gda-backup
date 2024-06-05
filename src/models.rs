@@ -6,9 +6,10 @@ use crate::schema::local_state::dsl::*;
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::schema::glacier_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[derive(Clone)]
 pub struct GlacierFile {
     pub file_path: String,
-    // pub file_hash: Bytea,
+    pub file_hash: Option<String>,
     pub modified: SystemTime,
     pub uploaded: Option<SystemTime>,
     pub pending_delete: bool
@@ -17,20 +18,12 @@ pub struct GlacierFile {
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::schema::local_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[derive(Clone)]
 pub struct LocalFile {
     pub file_path: String,
     // pub file_hash: Bytea,
     pub modified: SystemTime,
 }
-
-#[derive(Insertable)]
-#[diesel(table_name = crate::schema::local_state)]
-pub struct NewLocalFile<'a> {
-    pub file_path: &'a str,
-    // pub file_hash: &'a [u8],
-    pub modified: &'a SystemTime,
-}
-
 
 impl LocalFile {
     pub fn insert(&self, conn: &mut PgConnection) -> LocalFile {
@@ -75,6 +68,7 @@ impl GlacierFile {
             .filter(crate::schema::glacier_state::dsl::file_path.eq(&self.file_path))
             .set((
                 crate::schema::glacier_state::dsl::file_path.eq(&self.file_path),
+                crate::schema::glacier_state::dsl::file_hash.eq(&self.file_hash),
                 crate::schema::glacier_state::dsl::modified.eq(&self.modified),
                 crate::schema::glacier_state::dsl::uploaded.eq(&self.uploaded),
                 crate::schema::glacier_state::dsl::pending_delete.eq(&self.pending_delete)

@@ -8,6 +8,11 @@ pub struct Args {
     pub target_dir: String,
     #[arg(short = 'b', long)]
     pub bucket_name: String,
+    #[arg(short = 'd', long)]
+    pub dynamo_table: String,
+
+    #[arg(short = 'm', long, default_value_t = 180)]
+    pub min_storage_duration: i64,
     
     #[arg(short = 'e', long)]
     pub db_engine: String,
@@ -20,6 +25,6 @@ pub struct Args {
     #[arg(short = 'n', long)]
     pub db_name: String,
 
-    #[arg(short = 'd', long, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     pub dry_run: bool,
 }

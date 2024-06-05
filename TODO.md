@@ -33,38 +33,53 @@
 
 ```json
 hash: {
-    "current": [ "file path" ],
+    "file_names": [ "file path" ],
     "expiration": "time"
 }
 ```
 
 ### Tasks
 
-- create object_life argument
+- create min_storage_duration argument
 - get hashes of possible files
 - upserting:
     - if hash in db: 
-        - if dynamo.hash.current.len == 0:
-            - add filename to dynamo.hash.current
+        - if dynamo.hash.file_names.len == 0:
             - if not expired:
                 - remove delete marker
+                - on failure, upload file
             - else:
                 - upload file
-        - else:
-            - add filename to dynamo.hash.current
-        - remove filename from dynamo.old_hash.current
-        - if dynamo.current.len == 0
+        - move filenames from dynamo.old_hash.file_names to dynamo.hash.file_names
+        - if dynamo.old_hash.file_names.len == 0
             - delete from s3
     - else:
+        - upload file
         - create new hash entry
-            - dynamo.hash.current = [ filename ]
-            - dynamo.hash.expiration = now + object_life
-        - upload to dynamodb
+            - dynamo.hash.file_names = [ filename ]
+            - dynamo.hash.expiration = now + min_storage_duration
 - deleting:
-    - remove filename from dynamo.old_hash.current
-    - if dynamo.current.len == 0
+    - remove filename from dynamo.old_hash.file_names
+    - if dynamo.file_names.len == 0
         - delete from s3
+    - on delete failure
+        - File not found
+            - delete local entry
+            - delete all filenames from dynamo entry
+        - other
+            - continue
 - clean up: 
     - delete all entries with:
-        - dynamo.hash.current.len == 0 and 
+        - dynamo.hash.file_names.len == 0 and 
         - dynamo.hash.expiration < now
+
+## DynamoDB
+- key:
+    - hash
+- Table class:
+    - start with Standard
+    - switch to Standard-IA after initial upload
+- Read/write capacity settings:
+    - On-demand
+- Deletion protection:
+    - on

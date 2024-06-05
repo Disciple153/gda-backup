@@ -2,11 +2,14 @@ pub mod models;
 pub mod schema;
 pub mod backup;
 pub mod restore;
+pub mod aws;
 pub mod s3;
+pub mod dynamodb;
 pub mod environment;
 
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
+use diesel::result::Error;
 use dotenvy::dotenv;
 use environment::Args;
 use models::{GlacierFile, LocalFile};
@@ -58,6 +61,12 @@ pub fn clear_glacier_state(conn: &mut PgConnection) {
     diesel::delete(glacier_state)
         .execute(conn)
         .expect("Error clearing glacier_state.");
+}
+
+pub fn get_glacier_file(conn: &mut PgConnection, file_path: String) -> Result<GlacierFile, Error> {
+    glacier_state
+        .find(file_path)
+        .first(conn)
 }
 
 pub fn get_pending_upload_files(conn: &mut PgConnection) -> Vec<GlacierFile> {

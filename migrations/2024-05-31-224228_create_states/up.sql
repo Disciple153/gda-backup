@@ -1,7 +1,7 @@
 -- Your SQL goes here
 CREATE TABLE glacier_state (
   file_path TEXT PRIMARY KEY,
-  --file_hash BYTEA NOT NULL,
+  file_hash TEXT,
   modified TIMESTAMP NOT NULL,
   uploaded TIMESTAMP,
   pending_delete BOOL NOT NULL DEFAULT FALSE

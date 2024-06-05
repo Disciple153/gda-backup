@@ -22,6 +22,7 @@ pub async fn db_from_s3(args: &Args, conn: &mut PgConnection, s3_client: &S3Clie
 
                     GlacierFile {
                         file_path: object.key().unwrap_or("Unknown").to_string(),
+                        file_hash: None,
                         modified: last_modified,
                         uploaded: Some(last_modified),
                         pending_delete: false,
