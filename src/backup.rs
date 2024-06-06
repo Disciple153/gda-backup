@@ -158,7 +158,22 @@ struct HashJob {
     file: GlacierFile,
 }
 
+#[derive(Clone)]
+struct NoUploadLocalUpdateJob1 {
+    old_hash: String,
+    //old_hash_tracker: Option<HashTracker>,
+    file: GlacierFile,
+}
+
+#[derive(Clone)]
+struct NoUploadLocalUpdateJob2 {
+    //old_hash: String,
+    old_hash_tracker: HashTracker,
+    file: GlacierFile,
+}
+
 async fn complete_put<'a>(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoClient, files: &mut Vec<GlacierFile>) -> usize {
+    let mut next_jobs_1 = Vec::new();
 
     let mut failures = 0;
 
@@ -197,10 +212,14 @@ async fn complete_put<'a>(args: &Args, conn: &mut PgConnection, s3_client: &S3Cl
     let mut s3_undelete = FuturesOrdered::new();
     let mut s3_undelete_post = Vec::new();
 
-    // File was previously uploaded and is still active
-    let mut no_upload_add_filenames = FuturesOrdered::new();
-    let mut no_upload_del_filenames = Vec::new();
-    let mut no_upload_local_updates = Vec::new();
+    
+    // No upload local update
+    let mut no_upload_local_upds = FuturesOrdered::new();
+    let mut no_upload_local_jobs = Vec::new();
+
+    // No upload local new
+    let mut no_upload_local_news = FuturesOrdered::new();
+    let mut no_upload_local_news_file = Vec::new();
 
     let mut hash_jobs: &mut Vec<HashJob>;
 
@@ -218,23 +237,38 @@ async fn complete_put<'a>(args: &Args, conn: &mut PgConnection, s3_client: &S3Cl
 
                 // If there are active versions
                 if h_t.has_files() {
+                    match file.file_hash.clone() {
 
-                    // Add filename to new dynamodb hash entry
-                    h_t.add_file_name(file.file_path.clone());
-                    no_upload_add_filenames.push_back(hash_tracker.put(dynamo_client, args.dynamo_table.clone()));
+                        // If this file was changed locally
+                        Some(file_hash) => {
 
-                    // Remove filename from old dynamo hash entry
-                    no_upload_del_filenames.push(HashTracker::del_file_name_remote(
-                        dynamo_client,
-                        args.dynamo_table.clone(),
-                        file.file_hash.clone(),
-                        file.file_path.clone()
-                    ));
+                            // Add filename to new dynamodb hash entry
+                            h_t.add_file_name(file.file_path.clone());
+                            no_upload_local_upds.push_back(hash_tracker.put(dynamo_client, args.dynamo_table.clone()));
 
-                    // Update local database
-                    file.file_hash = Some(h_t.hash.clone());
-                    file.uploaded = Some(file.modified);
-                    no_upload_local_updates.push(file);
+                            // Update local database
+                            file.file_hash = Some(h_t.hash.clone());
+                            file.uploaded = Some(file.modified);
+
+                            no_upload_local_jobs.push(NoUploadLocalUpdateJob1 {
+                                old_hash: file_hash,
+                                file: file.clone(),
+                            });
+                        },
+
+                        // If this is a new file locally
+                        None => {
+                            
+                            // Add filename to new dynamodb hash entry
+                            h_t.add_file_name(file.file_path.clone());
+                            no_upload_local_news.push_back(hash_tracker.put(dynamo_client, args.dynamo_table.clone()));
+
+                            // Update local database
+                            file.file_hash = Some(h_t.hash.clone());
+                            file.uploaded = Some(file.modified);
+                            no_upload_local_news_file.push(file);
+                        },
+                    };
                 }
                 
                 // If there is no active version for the hash
@@ -271,7 +305,7 @@ async fn complete_put<'a>(args: &Args, conn: &mut PgConnection, s3_client: &S3Cl
                     file.uploaded = Some(file.modified);
 
                     (*hash_jobs).push(HashJob {
-                        hash_tracker: hash_tracker.clone(),
+                        hash_tracker: h_t.clone(),
                         file: file.clone(),
                     });
                 };
@@ -304,21 +338,135 @@ async fn complete_put<'a>(args: &Args, conn: &mut PgConnection, s3_client: &S3Cl
         };
     };
 
-    // NO UPLOAD
+    // NO UPLOAD LOCAL UPDATE
 
-    let results: Vec<_> = no_upload_add_filenames.collect().await;
-    let mut no_upload_del_filename_futures = FuturesOrdered::new();
+    // update new hash trackers
+    let results: Vec<_> = no_upload_local_upds.collect().await;
+    let mut next_futures = FuturesOrdered::new();
+    let mut next_jobs = Vec::new();
     let mut i = 0;
 
-    for no_upload_del_filename in no_upload_del_filenames {
-        dbg!("File Moved. Creating reference...");
+    for job in no_upload_local_jobs {
+        let result = &results[i];
+        i += 1;
+
+        dbg!("No upload local update");
+
+        match result {
+            Ok(_) => {
+                next_futures.push_back(HashTracker::get(dynamo_client, args.dynamo_table.clone(), job.old_hash.clone()));
+                next_jobs.push(job);
+            },
+            Err(error) => {
+                dbg!(error);
+                failures += 1;
+            },
+        };
+    }
+    
+    // get old hash trackers
+    let results: Vec<_> = next_futures.collect().await;
+    let jobs = next_jobs;
+    let mut next_futures = FuturesOrdered::new();
+    let mut i = 0;
+
+    let mut local_files_to_update = Vec::new();
+
+    for job in jobs {
+        let result = &results[i];
+        i += 1;
+
+        match result {
+            Ok(hash_tracker) => {
+                let mut old_hash_tracker = hash_tracker.clone();
+                old_hash_tracker.del_file_name(job.file.file_path.clone());
+
+                if old_hash_tracker.has_files() {
+                    local_files_to_update.push(job.file);
+                }
+                else {
+                    next_futures.push_back(s3::delete(s3_client, args.bucket_name.clone(), job.old_hash.clone()));
+                    next_jobs_1.push(NoUploadLocalUpdateJob2 {
+                        old_hash_tracker,
+                        file: job.file,
+                    });
+                };
+            },
+            Err(error) => {
+                dbg!(error);
+                failures += 1;
+            },
+        };
+    }
+
+    // remove file from old hash tracker
+    // if old hash tracker is emptied
+        // delete file from s3
+    let results: Vec<_> = next_futures.collect().await;
+    let mut next_futures = FuturesOrdered::new();
+    let mut next_jobs = Vec::new();
+    let mut i = 0;
+
+    for job in &mut next_jobs_1 {
+        let result = &results[i];
+        i += 1;
+
+        match result {
+            Ok(_) => {
+                if job.old_hash_tracker.expiration < Utc::now() {
+                    next_jobs.push(job.clone());
+                    next_futures.push_back(job.old_hash_tracker.delete(dynamo_client, args.dynamo_table.clone()));
+                }
+                else {
+                    local_files_to_update.push(job.file.clone());
+                };
+            },
+            Err(error) => {
+                dbg!(error);
+                failures += 1;
+            },
+        };
+    }
+
+        // if old hash tracker is expired
+            // delete old hash tracker
+    let results: Vec<_> = next_futures.collect().await;
+    let jobs = next_jobs;
+    let mut i = 0;
+
+    for job in jobs {
+        let result = &results[i];
+        i += 1;
+
+        match result {
+            Ok(_) => {
+                local_files_to_update.push(job.file.clone());
+            },
+            Err(error) => {
+                dbg!(error);
+                failures += 1;
+            },
+        };
+    }
+
+    // update local database entry
+    for file in local_files_to_update {
+        file.update(conn);
+    };
+
+    // NO UPLOAD LOCAL NEW
+    let results: Vec<_> = no_upload_local_news.collect().await;
+    let mut i = 0;
+
+    for no_upload_local_new_file in no_upload_local_news_file {
+        dbg!("File moved. Creating reference...");
         
         let result = &results[i];
         i += 1;
 
         match result {
             Ok(_) => {
-                no_upload_del_filename_futures.push_back(no_upload_del_filename);
+                no_upload_local_new_file.update(conn);
             },
             Err(error) => {
                 dbg!(error);
@@ -326,32 +474,6 @@ async fn complete_put<'a>(args: &Args, conn: &mut PgConnection, s3_client: &S3Cl
             },
         };
 
-    };
-
-    let results: Vec<_> = no_upload_del_filename_futures.collect().await;
-    let mut i = 0;
-
-    for no_upload_local_update in no_upload_local_updates {
-        
-        let result = &results[i];
-        i += 1;
-
-        match result {
-            Ok(_) => {
-                no_upload_local_update.update(conn);
-            },
-            Err(error) => {
-                match error {
-                    crate::dynamodb::HashTrackerError::NotFoundError(_) => {
-                        no_upload_local_update.update(conn);
-                    },
-                    error => {
-                        dbg!(error);
-                        failures += 1;
-                    }
-                };
-            },
-        };
     };
 
     // UNDELETE

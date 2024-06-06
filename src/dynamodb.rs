@@ -34,9 +34,6 @@ pub enum HashTrackerError {
 
     #[error("DynamoDbGetItemError")]
     DynamoDbGetItemError(String),
-    
-    #[error("NotFoundError")]
-    NotFoundError(String),
 }
 
 
@@ -107,6 +104,8 @@ impl HashTracker {
             file_names = vec![NONE_STR.to_string()];
         }
 
+        dbg!(self.file_names.clone());
+
         let response = client.put_item()
             .table_name(table_name)
             .item(HASH_KEY, AttributeValue::S(self.hash.clone()))
@@ -153,42 +152,7 @@ impl HashTracker {
         };
     }
 
-    pub async fn del_file_name_remote(client: &Client, table_name: String, hash: Option<String>, file_name: String) -> Result<PutItemOutput, HashTrackerError>  {
-        let Some(hash) = hash else { 
-            return Err(HashTrackerError::NotFoundError("No hash provided.".to_string())) 
-        };
-
-        let Ok(mut hash_tracker) = HashTracker::get(client, table_name.clone(), hash).await else { 
-            return Err(HashTrackerError::NotFoundError("HashTracker not found.".to_string())) 
-        };
-
-        hash_tracker.del_file_name(file_name);
-        
-        hash_tracker.put(client, table_name).await
-    }
-
     pub fn has_files(&self) -> bool {
         self.file_names.len() > 0
     }
-
-    // pub async fn move_filename_from(&mut self, client: &Client, table_name: String, file_name: String, old_hash: Option<String>) -> Result<bool, HashTrackerError> {
-        
-    //     self.file_names.push(file_name.clone());
-    //     self.put(client, table_name.clone()).await?;
-
-    //     let Some(old_hash) = old_hash else { return Ok(false) };
-    //     let Ok(mut old) = HashTracker::get(client, table_name.clone(), old_hash).await else { return Ok(false) };
-    //     let Some(index) = old.file_names.iter().position(|x| *x == file_name) else { return Ok(false) };
-
-    //     old.file_names.remove(index);
-
-    //     if old.file_names.len() == 0 && old.expiration < Utc::now() {
-    //         let _ = old.delete(client, table_name.clone()).await;
-    //     }
-    //     else {
-    //         let _ = old.put(client, table_name.clone()).await;
-    //     };
-
-    //     Ok(old.file_names.len() == 0)
-    // }
 }
