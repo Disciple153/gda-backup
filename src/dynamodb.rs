@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::slice::Iter as SliceIter;
+
 use chrono::{
     DateTime,
     Utc,
@@ -8,6 +11,7 @@ use crate::aws;
 
 use aws_sdk_dynamodb::Client;
 use aws_sdk_dynamodb::operation::get_item::GetItemError;
+use aws_sdk_dynamodb::operation::scan::ScanError;
 use aws_sdk_dynamodb::operation::put_item::{PutItemError, PutItemOutput};
 use aws_sdk_dynamodb::operation::delete_item::{DeleteItemError, DeleteItemOutput};
 use aws_sdk_dynamodb::types::AttributeValue;
@@ -25,6 +29,9 @@ const NONE_STR: &str = "NONE";
 pub enum HashTrackerError {
     #[error("DynamoDbSdkErrorGet")]
     DynamoDbSdkErrorGet(#[from] SdkError<GetItemError, Response>),
+
+    #[error("DynamoDbSdkErrorScan")]
+    DynamoDbSdkErrorScan(#[from] SdkError<ScanError, Response>),
 
     #[error("DynamoDbSdkErrorPut")]
     DynamoDbSdkErrorPut(#[from] SdkError<PutItemError, Response>),
@@ -60,6 +67,19 @@ impl HashTracker {
         }
     }
 
+    pub fn import(hash: String, expiration: DateTime<Utc>, file_names: Vec<String>) -> HashTracker { 
+
+        HashTracker {
+            hash,
+            expiration,
+            file_names,
+        }
+    }
+
+    pub fn files(&self) -> SliceIter<'_, String> {
+        self.file_names.iter()
+    }
+
     pub async fn get(client: &Client, table_name: String, hash: String) -> Result<HashTracker, HashTrackerError> {
         let empty_vec = vec![];
 
@@ -93,6 +113,34 @@ impl HashTracker {
         Ok(hash_tracker)
     }
 
+    pub async fn get_all(client: &Client, table_name: String) -> Result<Vec<HashTracker>, SdkError<ScanError, Response>> {
+        Ok(client
+            // Get all items in given table
+            .scan().table_name(table_name)
+
+            // Send paginated scan command
+            .into_paginator().items().send()
+
+            // Get results as a Vec of HashMaps
+            .collect::<Result<Vec<HashMap<String, AttributeValue>>, _>>().await?
+
+            // Convert each valid item into a HashTracker
+            .iter().map(|value| {
+                let hash = value.get(FILE_NAMES_KEY)?.as_s().ok()?.to_owned();
+                let expiration= value.get(EXPIRATION_KEY)?.as_s().ok()?.parse().ok()?;
+                let file_names = value.get(FILE_NAMES_KEY)?.as_ss().ok()?.to_owned();
+
+                Some(HashTracker::import(hash, expiration, file_names))
+            })
+
+            // Get rid of None items
+            .flatten()
+            
+            // Return as Vec
+            .collect()
+        )
+    }
+
     pub async fn put(&self, client: &Client, table_name: String) -> Result<PutItemOutput, HashTrackerError> {
 
         let file_names;
@@ -103,8 +151,6 @@ impl HashTracker {
         else {
             file_names = vec![NONE_STR.to_string()];
         }
-
-        dbg!(self.file_names.clone());
 
         let response = client.put_item()
             .table_name(table_name)

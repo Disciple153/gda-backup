@@ -65,7 +65,7 @@ async fn main() -> Result<(), Error> {
     // If glacier_state is empty, populate it from Glacier.
     if glacier_state_is_empty(conn) {
         println!("Glacier state empty. Loading state from S3");
-        restore::db_from_s3(args, conn, &s3_client).await;
+        let _ = restore::db_from_s3(args, conn, &s3_client, &dynamo_client).await;
     }
 
     // UPLOAD NEW FILES

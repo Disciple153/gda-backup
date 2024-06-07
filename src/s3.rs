@@ -1,10 +1,26 @@
-use std::{io::Error, path::Path};
+use std::{
+    collections::HashMap, 
+    io::Error, 
+    path::Path, 
+    time::SystemTime
+};
 use aws_sdk_s3::{
     error::SdkError,
-    operation::{delete_object::{DeleteObjectError, DeleteObjectOutput}, list_object_versions::ListObjectVersionsError, list_objects_v2::paginator::ListObjectsV2Paginator, put_object::{
-        PutObjectError,
-        PutObjectOutput
-    }},
+    operation::{
+        delete_object::{
+            DeleteObjectError, 
+            DeleteObjectOutput
+        }, 
+        list_object_versions::ListObjectVersionsError, 
+        list_objects_v2::{
+            ListObjectsV2Error, 
+            ListObjectsV2Output
+        },
+        put_object::{
+            PutObjectError,
+            PutObjectOutput
+        }
+    },
     primitives::ByteStream,
     Client,
 };
@@ -45,12 +61,57 @@ pub async fn delete(client: &Client, bucket: String, key: String) -> Result<Dele
         .await
 }
 
-pub fn list(client: &Client, bucket: String) -> ListObjectsV2Paginator {
+pub async fn list_objects(client: &Client, bucket: &str) -> Result<(), Error> {
+    let mut response = client
+        .list_objects_v2()
+        .bucket(bucket.to_owned())
+        .max_keys(10) // In this example, go 10 at a time.
+        .into_paginator()
+        .send();
 
-    client
+    while let Some(result) = response.next().await {
+        match result {
+            Ok(output) => {
+                for object in output.contents() {
+                    println!(" - {}", object.key().unwrap_or("Unknown"));
+                }
+            }
+            Err(err) => {
+                eprintln!("{err:?}")
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn list(client: &Client, bucket: String) -> Result<HashMap<String, SystemTime>, SdkError<ListObjectsV2Error>> {
+
+    let mut output = HashMap::new();
+
+    let _ = client
         .list_objects_v2()
         .bucket(bucket.to_owned())
         .into_paginator()
+        .send()
+        .collect::<Result<Vec<ListObjectsV2Output>, SdkError<ListObjectsV2Error>>>()
+        .await?
+        
+        // For every page in the results
+        .iter().map(|page| {
+
+            // For every file in the page
+            let _ = page.contents().iter().map(|file| {
+                output.insert(
+                    file.key()?.to_owned(), 
+                    SystemTime::try_from(*file.last_modified()?).ok()?
+                );
+
+                Some(())
+            });
+        });
+    
+    Ok(output)
 }
 
 async fn get_delete_marker_versions(client: &Client, bucket: String, key: String,) -> Result<Vec<String>, SdkError<ListObjectVersionsError, Response>> {
