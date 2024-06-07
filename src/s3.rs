@@ -39,7 +39,7 @@ pub async fn get_client() -> Client {
     Client::new(&config)
 }
 
-pub async fn put(client: &Client, bucket_name: String, file_path: String, key: String) -> Result<PutObjectOutput, SdkError<PutObjectError>> {
+pub async fn put(client: &Client, bucket_name: String, key: String, file_path: String,) -> Result<PutObjectOutput, SdkError<PutObjectError>> {
 
     let body = ByteStream::from_path(Path::new(&file_path)).await;
     client
@@ -59,6 +59,25 @@ pub async fn delete(client: &Client, bucket: String, key: String) -> Result<Dele
         .key(key)
         .send()
         .await
+}
+
+pub async fn undelete(client: &Client, bucket: String, key: String) -> Result<(), SdkError<ListObjectVersionsError, Response>> {
+    let delete_futures = FuturesUnordered::new();
+    
+    let dm_versions = get_delete_marker_versions(client, bucket.clone(), key.clone()).await?;
+
+    for version in dm_versions {
+        delete_futures.push(client
+            .delete_object()
+            .bucket(bucket.clone())
+            .key(key.clone())
+            .version_id(version)
+            .send());
+    };
+
+    let _: Vec<_> = delete_futures.collect().await;
+
+    Ok(())
 }
 
 pub async fn list_objects(client: &Client, bucket: &str) -> Result<(), Error> {
@@ -134,23 +153,4 @@ async fn get_delete_marker_versions(client: &Client, bucket: String, key: String
     };
 
     Ok(output)
-}
-
-pub async fn undelete(client: &Client, bucket: String, key: String) -> Result<(), SdkError<ListObjectVersionsError, Response>> {
-    let delete_futures = FuturesUnordered::new();
-    
-    let dm_versions = get_delete_marker_versions(client, bucket.clone(), key.clone()).await?;
-
-    for version in dm_versions {
-        delete_futures.push(client
-            .delete_object()
-            .bucket(bucket.clone())
-            .key(key.clone())
-            .version_id(version)
-            .send());
-    };
-
-    let _: Vec<_> = delete_futures.collect().await;
-
-    Ok(())
 }

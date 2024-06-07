@@ -1,11 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::slice::Iter as SliceIter;
 
 use chrono::{
     DateTime,
     Utc,
 };
-use ordered_vec::OrdVec;
 
 use crate::aws;
 
@@ -53,7 +52,7 @@ pub async fn get_client() -> Client {
 pub struct HashTracker {
     pub hash: String,
     pub expiration: DateTime<Utc>,
-    file_names: Vec<String>,
+    file_names: HashSet<String>,
 }
 
 impl HashTracker {
@@ -63,11 +62,11 @@ impl HashTracker {
         HashTracker {
             hash,
             expiration: DateTime::UNIX_EPOCH,
-            file_names: vec![],
+            file_names: HashSet::new(),
         }
     }
 
-    pub fn import(hash: String, expiration: DateTime<Utc>, file_names: Vec<String>) -> HashTracker { 
+    fn import(hash: String, expiration: DateTime<Utc>, file_names: Vec<String>) -> HashTracker { 
 
         HashTracker {
             hash,
@@ -92,7 +91,7 @@ impl HashTracker {
 
         let mut hash_tracker = HashTracker {
             hash,
-            file_names: file_names.clone(),
+            file_names: file_names.iter().cloned().collect(),
             expiration,
         };
 
@@ -125,12 +124,12 @@ impl HashTracker {
         )
     }
 
-    pub async fn put(&self, client: &Client, table_name: String) -> Result<PutItemOutput, HashTrackerError> {
+    async fn put(&self, client: &Client, table_name: String) -> Result<PutItemOutput, HashTrackerError> {
 
-        let file_names;
+        let file_names: Vec<String>;
 
         if self.has_files() {
-            file_names = self.file_names.clone();
+            file_names = self.file_names.iter().cloned().collect::<Vec<_>>();
         }
         else {
             file_names = vec![NONE_STR.to_string()];
@@ -146,7 +145,7 @@ impl HashTracker {
         Ok(response)
     }
 
-    pub async fn delete(&self, client: &Client, table_name: String) -> Result<DeleteItemOutput, HashTrackerError> {
+    async fn delete(&self, client: &Client, table_name: String) -> Result<DeleteItemOutput, HashTrackerError> {
         let response = client.delete_item()
             .table_name(table_name)
             .key(HASH_KEY, AttributeValue::S(self.hash.clone()))
@@ -155,32 +154,23 @@ impl HashTracker {
         Ok(response)
     }
 
+    pub async fn update(&self, client: &Client, table_name: String) -> Result<(), HashTrackerError> {
+        if !self.has_files() && self.is_expired() {
+            self.delete(client, table_name).await?;
+        }
+        else {
+            self.put(client, table_name).await?;
+        }
+
+        Ok(())
+    }
+
     pub fn add_file_name(&mut self, file_name: String) {
-        
-        match self.file_names.iter().position(|x| *x == file_name) {
-
-            // If file_name is already in file_names
-            Some(_) => (),
-
-            // If file_name is not in file_names
-            None => {
-                let _ = self.file_names.push_ord_ascending(file_name);
-            },
-        };
+        self.file_names.remove(&file_name);
     }
 
     pub fn del_file_name(&mut self, file_name: String) {
-       
-        match self.file_names.iter().position(|x| *x == file_name) {
-
-            // If file_name is already in file_names
-            Some(index) => {
-                self.file_names.remove(index);
-            },
-
-            // If file_name is not in file_names
-            None => (),
-        };
+        self.file_names.insert(file_name);
     }
 
     pub fn has_files(&self) -> bool {
@@ -191,3 +181,11 @@ impl HashTracker {
         self.expiration < Utc::now()
     }
 }
+
+impl PartialEq for HashTracker {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash &&
+        self.file_names == other.file_names
+    }
+}
+impl Eq for HashTracker {}

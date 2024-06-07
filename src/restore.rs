@@ -32,8 +32,6 @@ pub async fn db_from_s3(args: &Args, conn: &mut PgConnection, s3_client: &S3Clie
                 file_path: file.to_string(),
                 file_hash: Some(hash_tracker.hash.clone()),
                 modified: *modified,
-                uploaded: Some(*modified),
-                pending_delete: false,
             }.insert(conn);
 
             Some(())

@@ -18,8 +18,6 @@ use crate::schema::glacier_state::dsl::{
     glacier_state,
     file_path as glacier_file_path,
     modified as glacier_modified,
-    uploaded as glacier_uploaded,
-    pending_delete,
 };
 use crate::schema::local_state::dsl::{
     local_state,
@@ -69,31 +67,6 @@ pub fn get_glacier_file(conn: &mut PgConnection, file_path: String) -> Result<Gl
         .first(conn)
 }
 
-pub fn get_pending_upload_files(conn: &mut PgConnection) -> Vec<GlacierFile> {
-    glacier_state
-        .filter(glacier_uploaded.is_null())
-        .select(GlacierFile::as_select())
-        .load(conn)
-        .expect("Error getting pending uploads.")
-}
-
-pub fn get_pending_update_files(conn: &mut PgConnection) -> Vec<GlacierFile> {
-    glacier_state
-        .filter(glacier_uploaded.is_not_null())
-        .filter(glacier_modified.nullable().ne(glacier_uploaded))
-        .select(GlacierFile::as_select())
-        .load(conn)
-        .expect("Error getting pending updates.")
-}
-
-pub fn get_pending_delete_files(conn: &mut PgConnection) -> Vec<GlacierFile> {
-    glacier_state
-        .filter(pending_delete)
-        .select(GlacierFile::as_select())
-        .load(conn)
-        .expect("Error getting pending deletes.")
-}
-
 pub fn get_new_files(conn: &mut PgConnection) -> Vec<LocalFile> {
     let join = local_state.left_join(glacier_state);
 
@@ -122,4 +95,3 @@ pub fn get_missing_files(conn: &mut PgConnection) -> Vec<GlacierFile> {
         .load(conn)
         .expect("Error getting deleted files.")
 }
-

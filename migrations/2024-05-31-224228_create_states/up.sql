@@ -2,9 +2,7 @@
 CREATE TABLE glacier_state (
   file_path TEXT PRIMARY KEY,
   file_hash TEXT,
-  modified TIMESTAMP NOT NULL,
-  uploaded TIMESTAMP,
-  pending_delete BOOL NOT NULL DEFAULT FALSE
+  modified TIMESTAMP NOT NULL
 );
 
 CREATE TABLE local_state (
