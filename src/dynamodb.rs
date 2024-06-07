@@ -58,12 +58,12 @@ pub struct HashTracker {
 
 impl HashTracker {
 
-    pub fn new(hash: String, expiration: DateTime<Utc>, file_name: String) -> HashTracker { 
+    pub fn new(hash: String) -> HashTracker {
 
         HashTracker {
             hash,
-            expiration,
-            file_names: vec![file_name],
+            expiration: DateTime::UNIX_EPOCH,
+            file_names: vec![],
         }
     }
 
@@ -80,27 +80,15 @@ impl HashTracker {
         self.file_names.iter()
     }
 
-    pub async fn get(client: &Client, table_name: String, hash: String) -> Result<HashTracker, HashTrackerError> {
-        let empty_vec = vec![];
+    pub async fn get(client: &Client, table_name: String, hash: String) -> Option<HashTracker> {
 
         let result = client.get_item()
             .table_name(table_name)
             .key(HASH_KEY, AttributeValue::S(hash.clone()))
-            .send().await?;
+            .send().await.ok()?.item?;
 
-        let map = match result.item {
-            Some(m) => m,
-            None => return Err(HashTrackerError::DynamoDbGetItemError("Error getting HashTracker value".to_string())),
-        };
-
-        let file_names = map.get(FILE_NAMES_KEY)
-            .unwrap_or(&AttributeValue::Null(true))
-            .as_ss().unwrap_or(&empty_vec);
-
-        let expiration = match map.get(EXPIRATION_KEY).unwrap_or(&AttributeValue::Null(true)).as_s() {
-            Ok(expiration_string) => expiration_string.parse().unwrap_or(DateTime::UNIX_EPOCH),
-            Err(_) => DateTime::UNIX_EPOCH,
-        };
+        let file_names = result.get(FILE_NAMES_KEY)?.as_ss().ok()?;
+        let expiration = result.get(EXPIRATION_KEY)?.as_s().ok()?.parse().ok()?;
 
         let mut hash_tracker = HashTracker {
             hash,
@@ -110,19 +98,15 @@ impl HashTracker {
 
         hash_tracker.del_file_name(NONE_STR.to_string());
 
-        Ok(hash_tracker)
+        Some(hash_tracker)
     }
 
-    pub async fn get_all(client: &Client, table_name: String) -> Result<Vec<HashTracker>, SdkError<ScanError, Response>> {
-        Ok(client
+    pub async fn get_all(client: &Client, table_name: String) -> Option<Vec<HashTracker>> {
+        Some(client
             // Get all items in given table
             .scan().table_name(table_name)
-
-            // Send paginated scan command
             .into_paginator().items().send()
-
-            // Get results as a Vec of HashMaps
-            .collect::<Result<Vec<HashMap<String, AttributeValue>>, _>>().await?
+            .collect::<Result<Vec<HashMap<String, AttributeValue>>, _>>().await.ok()?
 
             // Convert each valid item into a HashTracker
             .iter().map(|value| {
@@ -186,6 +170,7 @@ impl HashTracker {
     }
 
     pub fn del_file_name(&mut self, file_name: String) {
+       
         match self.file_names.iter().position(|x| *x == file_name) {
 
             // If file_name is already in file_names
@@ -200,5 +185,9 @@ impl HashTracker {
 
     pub fn has_files(&self) -> bool {
         self.file_names.len() > 0
+    }
+
+    pub fn is_expired(&self) -> bool {
+        self.expiration < Utc::now()
     }
 }

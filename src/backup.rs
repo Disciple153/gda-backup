@@ -154,130 +154,115 @@ fn new_expiration(min_storage_duration: i64) -> DateTime<Utc> {
     }
 }
 
-async fn complete_put<'a>(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoClient, files: &mut Vec<GlacierFile>) -> usize {
+async fn get_old_hash_tracker(args: &Args, s3_client: &S3Client, dynamo_client: &DynamoClient, file: GlacierFile) -> Option<HashTracker> {
+    let mut hash_tracker = HashTracker::get(dynamo_client, args.dynamo_table.clone(), file.file_hash.clone()?).await?;
+    hash_tracker.del_file_name(file.file_path);
+
+    if !hash_tracker.has_files() {
+        let _ = s3::delete(s3_client, args.bucket_name.clone(), file.file_hash?);
+    };
+
+    Some(hash_tracker)
+}
+
+async fn complete_put(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoClient, files: &mut Vec<GlacierFile>) -> usize {
     let mut failures = 0;
 
     for file in files {
 
+        // GET HASH
         let new_hash = hash_file(Path::new(&file.file_path), HASH_ALGO);
-        let result = HashTracker::get(
+
+        // UPDATE DATABASE OBJECTS
+
+        // Get old hash tracker from old file hash, and remove old file name.
+        let old_hash_tracker = get_old_hash_tracker(args, s3_client, dynamo_client, file.clone()).await;
+
+        // Get new hash tracker from new file hash, or create a new hash tracker.
+        let mut new_hash_tracker = HashTracker::get(
             dynamo_client,
             args.dynamo_table.clone(),
             new_hash.clone()
-        ).await;
+        ).await.unwrap_or(HashTracker::new(new_hash.to_string()));
 
-        let mut hash_tracker = match result {
-            // If there was an active version at one point
-            Ok(mut h_t) => {
+        // If there are no active versions and all inactive versions have expired
+        if !new_hash_tracker.has_files() && new_hash_tracker.is_expired() {
 
-                // If there are active versions
-                if h_t.has_files() {
-                    
-                    match file.file_hash.clone() {
-
-                        // If this file was changed locally
-                        Some(file_hash) => {
-                            
-                            let result = HashTracker::get(dynamo_client, args.dynamo_table.clone(), file_hash.clone()).await;
-                            let mut old_hash_tracker = match result {
-                                Ok(value) => value,
-                                Err(_) => {
-                                    failures += 1;
-                                    continue;
-                                },
-                            };
-
-                            old_hash_tracker.del_file_name(file.file_path.clone());
-
-                            if !old_hash_tracker.has_files() {
-                                dbg!("No versions left. Deleting...");
-                                let result = s3::delete(s3_client, args.bucket_name.clone(), file_hash.clone()).await;
-
-                                if result.is_ok() && old_hash_tracker.expiration < Utc::now() {
-                                    let result = old_hash_tracker.delete(dynamo_client, args.dynamo_table.clone()).await;
-
-                                    if result.is_err() {
-                                        dbg!(result.err());
-                                        failures += 1;
-                                        continue;
-                                    }
-                                };
-                            };
-                        },
-
-                        // If this is a new file locally
-                        _ => (),
-                    };
-                }
-                
-                // If there is no active version for the hash
-                else {
-                    
-                    // If all inactive versions have expired
-                    if h_t.expiration < Utc::now() {
-
-                        let result = s3::put(s3_client, args.bucket_name.clone(), file.file_path.clone(),h_t.hash.clone()).await;
-                        dbg!("All inactive versions have expired. Reuploading...");
-
-                        if result.is_err() {
-                            dbg!(result.err());
-                            failures += 1;
-                            continue;
-                        };
-
-                        h_t.expiration = new_expiration(args.min_storage_duration);
-                    }
-
-                    // If there are inactive versions that have not expired
-                    else {
-                        let result = s3::undelete(s3_client, args.bucket_name.clone(), h_t.hash.clone()).await;
-                        dbg!("File is inactive, but has not expired. Undeleting...");
-
-                        if result.is_err() {
-                            dbg!(result.err());
-                            failures += 1;
-                            continue;
-                        };
-                    };
-                };
-
-                h_t
-            },
-
-            // If this is the first time this file has been uploaded
-            Err(_) => {
-                let result = s3::put(s3_client, args.bucket_name.clone(), file.file_path.clone(),new_hash.clone()).await;
-                dbg!("New file. Uploading...");
-
-                if result.is_err() {
-                    dbg!(result.err());
+            dbg!("All inactive versions have expired. Reuploading...");
+            match s3::put(s3_client, args.bucket_name.clone(), file.file_path.clone(),new_hash_tracker.hash.clone()).await {
+                Ok(_) => (),
+                Err(error) => {
+                    dbg!(error);
                     failures += 1;
                     continue;
-                };
+                },
+            };
 
-                HashTracker::new (
-                    new_hash.to_string(), 
-                    new_expiration(args.min_storage_duration), 
-                    file.file_path.clone()
-                )
+            new_hash_tracker.expiration = new_expiration(args.min_storage_duration);
+        }
+
+        // If there are inactive versions that have not expired
+        else if !new_hash_tracker.has_files() && !new_hash_tracker.is_expired() {
+
+            dbg!("File is inactive, but has not expired. Undeleting...");
+            match s3::undelete(s3_client, args.bucket_name.clone(), new_hash_tracker.hash.clone()).await {
+                Ok(_) => (),
+                Err(error) => {
+                    dbg!(error);
+                    failures += 1;
+                    continue;
+                },
+            };
+        };
+
+        // Add file name to new hash tracker
+        new_hash_tracker.add_file_name(file.file_path.clone());
+
+        // Update local file object
+        file.file_hash = Some(new_hash_tracker.hash.clone());
+        file.uploaded = Some(file.modified);
+
+        // UPLOAD DATABASE CHANGES
+
+        // Upload/delete old hash tracker
+        match old_hash_tracker {
+            Some(o_h_t) => {
+                if !o_h_t.has_files() && o_h_t.is_expired() {
+                    match o_h_t.delete(dynamo_client, args.dynamo_table.clone()).await {
+                        Ok(_) => (),
+                        Err(error) => {
+                            dbg!(error);
+                            failures += 1;
+                            continue;
+                        }
+                    };
+                }
+                else {
+                    match o_h_t.put(dynamo_client, args.dynamo_table.clone()).await {
+                        Ok(_) => (),
+                        Err(error) => {
+                            dbg!(error);
+                            failures += 1;
+                            continue;
+                        }
+                    };
+                }
+            }
+            None => {}
+        };
+
+        // Upload new hash tracker
+        match new_hash_tracker.put(dynamo_client, args.dynamo_table.clone()).await {
+            Ok(_) => (),
+            Err(error) => {
+                dbg!(error);
+                failures += 1;
+                continue;
             },
         };
 
-        hash_tracker.add_file_name(file.file_path.clone());
-
-        // Update local database
-        file.file_hash = Some(hash_tracker.hash.clone());
-        file.uploaded = Some(file.modified);
-
+        // Upload local database
         file.update(conn);
-
-        let result = hash_tracker.put(dynamo_client, args.dynamo_table.clone()).await;
-
-        if result.is_err() {
-            dbg!(result.err());
-            failures += 1;
-            continue;
-        };
     };
 
     failures
@@ -302,7 +287,7 @@ async fn complete_delete(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
         match hash_tracker_result {
 
             // If the file's hash was found in DynamoDB
-            Ok(mut hash_tracker) => {
+            Some(mut hash_tracker) => {
 
                 // Remove the file path from the hash_tracker
                 hash_tracker.del_file_name(file.file_path.clone());
@@ -356,7 +341,7 @@ async fn complete_delete(args: &Args, conn: &mut PgConnection, s3_client: &S3Cli
             },
 
             // If the file's hash was not found in DynamoDB
-            Err(_) => {
+            None => {
                 let result = s3::delete(s3_client, args.bucket_name.clone(), hash.clone()).await;
                 dbg!("File not found in DynamoDB. Adding delete marker...");
 
