@@ -1,6 +1,7 @@
 use crate::dynamodb::HashTracker;
 use crate::environment::Args;
 use crate::models::GlacierFile;
+use log::error;
 
 use crate::s3;
 use aws_sdk_dynamodb::Client as DynamoDbClient;
@@ -28,11 +29,16 @@ pub async fn db_from_s3(args: &Args, conn: &mut PgConnection, s3_client: &S3Clie
         let _ = hash_tracker.files().map(|file| {
 
             // Insert the file into the local database
-            GlacierFile {
+            let result = GlacierFile {
                 file_path: file.to_string(),
                 file_hash: Some(hash_tracker.hash.clone()),
                 modified: *modified,
             }.insert(conn);
+
+            match result {
+                Ok(_) => (),
+                Err(error) => error!("Failed to load file into local database from DynamoDB and S3: {:?}\n Error: {}", file, error),
+            };
 
             Some(())
         });

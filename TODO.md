@@ -11,32 +11,7 @@
     - compose file
 - Document recommended bucket settings
 
-- Supporting moving files
-    - Use DynamoDB to store map from hash to filename.
-    - Files are stored in S3, named by their hash.
-    - If local db is gone, replace it using DynamoDB.
-    - Only check hash if modified dates do not match.
-    - Only upload/update if hash has changed.
-    - If hash has not changed, but filename has, update DynamoDB.
-    - Make sure Dynamo is the cheapest key-value store.
-    - Handle multiple copies of one file which share hash
-    - Support undeleting files with hashes that came back?
-    - Verify that uploaded files and db entries refer to the same file
 - Compress files to be uploaded 
-
-## Stretch
-- Use hashes instead of file names
-
-## Hashing
-
-### DB Structure
-
-```json
-hash: {
-    "file_names": [ "file path" ],
-    "expiration": "time"
-}
-```
 
 ### Tasks
 
@@ -72,14 +47,3 @@ hash: {
     - delete all entries with:
         - dynamo.hash.file_names.len == 0 and 
         - dynamo.hash.expiration < now
-
-## DynamoDB
-- key:
-    - hash
-- Table class:
-    - start with Standard
-    - switch to Standard-IA after initial upload
-- Read/write capacity settings:
-    - On-demand
-- Deletion protection:
-    - on

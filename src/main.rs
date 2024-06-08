@@ -5,6 +5,8 @@ use aws_sdk_dynamodb::Client as DynamoClient;
 use clap::Parser;
 use walkdir::WalkDir;
 use diesel::prelude::PgConnection;
+use log::{LevelFilter, error};
+use env_logger::Builder;
 
 use glacier_sync::environment::Args;
 
@@ -27,6 +29,18 @@ async fn main() -> Result<(), Error> {
     // ARGUMENTS
     let args = &Args::parse();
 
+    // SET LOG LEVEL
+
+    if args.quiet {
+        Builder::new().filter_level(LevelFilter::Error).init();
+    }
+    else if args.debug {
+        Builder::new().filter_level(LevelFilter::Debug).init();
+    }
+    else {
+        Builder::new().filter_level(LevelFilter::Info).init();
+    }
+
     // GET CONNECTIONS
     let conn: &mut PgConnection = &mut establish_connection(args);
     let s3_client: &mut S3Client = &mut s3::get_client().await;
@@ -40,10 +54,15 @@ async fn main() -> Result<(), Error> {
     // Load local_state into database
     for file in WalkDir::new(args.target_dir.clone()).into_iter().filter_map(|e: Result<walkdir::DirEntry, walkdir::Error>| e.ok()) {
         if file.metadata()?.is_file() {
-            LocalFile {
+            let result = LocalFile {
                 file_path: file.path().display().to_string(),
                 modified: file.metadata()?.modified()?
             }.insert(conn);
+
+            match result {
+                Ok(_) => (),
+                Err(error) => error!("Failed to load file into local database: {:?}\n Error: {}", file, error),
+            }
         }
     }
 

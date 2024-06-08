@@ -1,4 +1,5 @@
 use diesel::prelude::*;
+use diesel::result::Error;
 use std::time::SystemTime;
 use crate::schema::glacier_state::dsl::*;
 use crate::schema::local_state::dsl::*;
@@ -25,24 +26,22 @@ pub struct LocalFile {
 }
 
 impl LocalFile {
-    pub fn insert(&self, conn: &mut PgConnection) -> LocalFile {
+    pub fn insert(&self, conn: &mut PgConnection) -> Result<LocalFile, Error> {
         diesel::insert_into(local_state)
             .values(self)
             .returning(LocalFile::as_returning())
             .get_result(conn)
-            .expect("Error saving new LocalFile.")
     }
 
-    pub fn delete(&self, conn: &mut PgConnection) {
+    pub fn delete(&self, conn: &mut PgConnection) -> Result<usize, diesel::result::Error> {
         diesel::delete(local_state.find(&self.file_path))
             .filter(crate::schema::local_state::dsl::file_path.eq(&self.file_path))
             .execute(conn)
-            .expect("Error deleting LocalFile.");
     }
 }
 
 impl GlacierFile {
-    pub fn insert(&self, conn: &mut PgConnection) -> GlacierFile {
+    pub fn insert(&self, conn: &mut PgConnection) -> Result<GlacierFile, Error> {
         diesel::insert_into(glacier_state)
             .values(self)
             .on_conflict(glacier_file_path)
@@ -50,13 +49,11 @@ impl GlacierFile {
             .set(self)
             .returning(GlacierFile::as_returning())
             .get_result(conn)
-            .expect("Error saving new GlacierFile.")
     }
 
-    pub fn delete(&self, conn: &mut PgConnection) {
+    pub fn delete(&self, conn: &mut PgConnection) -> Result<usize, diesel::result::Error> {
         diesel::delete(glacier_state.find(&self.file_path))
             .filter(crate::schema::glacier_state::dsl::file_path.eq(&self.file_path))
             .execute(conn)
-            .expect("Error deleting GlacierFile.");
     }
 }

@@ -9,4 +9,4 @@ cargo run -- \
     -p "password" \
     -a "localhost" \
     -n "backup_state" \
-    -m 1
+    -m 1 --debug

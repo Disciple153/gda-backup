@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use log::{debug, error};
 
 use crate::dynamodb::HashTracker;
 use crate::environment::Args;
@@ -145,52 +146,97 @@ pub async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, 
             // Delete
             if hash_tracker_change.old.has_files() {
                 if !hash_tracker_change.new.has_files() {
-                    println!("Deleting hash: {} from S3.", hash.clone());
-                    let Ok(_) = s3::delete(s3_client, args.bucket_name.clone(), hash.clone()).await 
-                        else { failures += 1; continue; };
+                    debug!("Deleting hash: {} from S3.", hash.clone());
+                    match s3::delete(s3_client, args.bucket_name.clone(), hash.clone()).await {
+                        Ok(_) => (),
+                        Err(error) => {
+                            error!("Failed to delete file from S3: {:?}\n Error: {}", hash_tracker_change, error);
+                            failures += 1;
+                            continue;
+                        }
+                    }
                 }
             }
 
             // Put
             else if hash_tracker_change.old.is_expired() {
                 if hash_tracker_change.new.has_files() {
-                    println!("Uploading hash: {} to S3.", hash.clone());
-                    let Some(g_file) = hash_tracker_change.created_files.first() 
-                        else { failures += 1; continue; };
-                    let Ok(_) = s3::put(s3_client, args.bucket_name.clone(), hash.clone(), g_file.file_path.to_string()).await 
-                        else { failures += 1; continue; };
+                    debug!("Uploading hash: {} to S3.", hash.clone());
+                    
+                    let g_file = match hash_tracker_change.created_files.first() {
+                        Some(value) => value,
+                        None => {
+                            error!("Internal error. File missing from hash tracker: {:?}", hash_tracker_change);
+                            failures += 1;
+                            continue;
+                        }
+                    };
+                    match s3::put(s3_client, args.bucket_name.clone(), hash.clone(), g_file.file_path.to_string()).await {
+                        Ok(_) => (),
+                        Err(error) => {
+                            error!("Failed to upload file to S3: {:?}\n Error: {}", hash_tracker_change, error);
+                            failures += 1;
+                            continue;
+                        }
+                    }
                 }
             }
 
             // Undelete
             else {
                 if hash_tracker_change.new.has_files() {
-                    println!("Undeleting hash: {} to S3.", hash.clone());
-                    let Ok(_) = s3::undelete(s3_client, args.bucket_name.clone(), hash.clone()).await 
-                        else { failures += 1; continue; };
+                    debug!("Undeleting hash: {} to S3.", hash.clone());
+                    match s3::undelete(s3_client, args.bucket_name.clone(), hash.clone()).await {
+                        Ok(_) => (),
+                        Err(error) => {
+                            error!("Failed to remove delete marker from file in S3: {:?}\n Error: {}", hash_tracker_change, error);
+                            failures += 1;
+                            continue;
+                        }
+                    }
                     hash_tracker_change.new.expiration = new_expiration(args.min_storage_duration.clone());
                 }
             }
 
             // Publish HashTrackers
-            println!("Uploading hash tracker: {} to DynamoDB.", hash.clone());
-            let Ok(_) = hash_tracker_change.new.update(dynamo_client, args.dynamo_table.clone()).await 
-                else { failures += 1; continue; };
+            debug!("Uploading hash tracker: {} to DynamoDB.", hash.clone());
+            match hash_tracker_change.new.update(dynamo_client, args.dynamo_table.clone()).await {
+                Ok(_) => (),
+                Err(error) => {
+                    error!("Failed to upload hash tracker to DynamoDB: {:?}\n Error: {}", hash_tracker_change, error);
+                    failures += 1;
+                    continue;
+                }
+            }
         }
 
         // Publish GlacierFiles
         for d_file in hash_tracker_change.deleted_files {
             if !deleted_g_files.contains(&d_file.file_path) && !existing_g_files.contains(&d_file.file_path) {
-                println!("Deleting file entry: {} from local database.", d_file.file_path.clone());
-                d_file.delete(conn);
+                debug!("Deleting file entry: {} from local database.", d_file.file_path.clone());
+                match d_file.delete(conn) {
+                    Ok(_) => (),
+                    Err(error) => {
+                        error!("Failed to remove file from local database: {:?}\n Error: {}", d_file, error);
+                        failures += 1;
+                        continue;
+                    }
+                }
                 deleted_g_files.insert(d_file.file_path.clone());
             }
         }
 
         for c_file in hash_tracker_change.created_files {
             if !saved_g_files.contains(&c_file.file_path) {
-                println!("Inserting file entry: {} to local database.", c_file.file_path.clone());
-                c_file.insert(conn);
+                debug!("Inserting file entry: {} to local database.", c_file.file_path.clone());
+                match c_file.insert(conn) {
+                    Ok(_) => (),
+                    Err(error) => {
+                        error!("Failed to insert/update file into local database: {:?}\n Error: {}", c_file, error);
+                        failures += 1;
+                        continue;
+                    }
+                };
                 saved_g_files.insert(c_file.file_path.clone());
             }
         }
