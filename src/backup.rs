@@ -34,18 +34,40 @@ use checksums::Algorithm::BLAKE2B as HASH_ALGO;
 #[cfg(not(target_pointer_width = "64"))]
 use checksums::Algorithm::BLAKE2S as HASH_ALGO;
 
-fn new_expiration(min_storage_duration: i64) -> DateTime<Utc> {
-    match Utc::now().checked_add_signed(Duration::days(min_storage_duration)) {
-        Some(time) => time,
-        None => DateTime::UNIX_EPOCH,
-    }
-}
-
+/// The `FileChange` struct in Rust represents a change in a GlacierFile with an
+/// optional old hash value.
+/// 
+/// Properties:
+/// 
+/// * `g_file`: The `g_file` property in the `FileChange` struct appears to be of
+/// type `GlacierFile`. It likely represents a file within a Glacier storage system.
+/// * `old_hash`: The `old_hash` property in the `FileChange` struct is an optional
+/// field that can hold a value of type `String`. It represents the previous hash
+/// value associated with the file before the change occurred. The `Option` enum in
+/// Rust is used to express that a value can be either something
 struct FileChange {
     g_file: GlacierFile,
     old_hash: Option<String>,
 }
 
+/// The `HashTrackerChange` struct represents changes in a `HashTracker` along with
+/// associated created and deleted files.
+/// 
+/// Properties:
+/// 
+/// * `new`: The `new` property in the `HashTrackerChange` struct is of type
+/// `HashTracker`. It likely represents the updated or new state of a hash tracker
+/// object.
+/// * `old`: The `old` property in the `HashTrackerChange` struct represents the
+/// previous state of a `HashTracker` object before any changes were made. It is
+/// used to track the original state before any modifications or updates occurred.
+/// * `created_files`: The `created_files` property in the `HashTrackerChange`
+/// struct is a vector that contains instances of the `GlacierFile` struct. This
+/// vector stores the files that were created as part of the change being tracked by
+/// the `HashTrackerChange` struct.
+/// * `deleted_files`: The `deleted_files` property in the `HashTrackerChange`
+/// struct is a vector of `GlacierFile` instances representing the files that were
+/// deleted in the change.
 #[derive(Clone, Debug)]
 struct HashTrackerChange {
     new: HashTracker,
@@ -54,6 +76,11 @@ struct HashTrackerChange {
     deleted_files: Vec<GlacierFile>,
 }
 
+/// The above Rust code defines an implementation for the `HashTrackerChange`
+/// struct. It includes a method `changed()` that returns a boolean value indicating
+/// whether the `new` field of the `HashTrackerChange` instance is different from
+/// the `old` field. The method compares the two fields and returns `true` if they
+/// are different, and `false` otherwise.
 impl HashTrackerChange {
     fn changed(&self) -> bool {
         self.new != self.old
@@ -61,6 +88,30 @@ impl HashTrackerChange {
 }
 
 
+/// The `backup` function in Rust asynchronously manages file backups by tracking
+/// changes, updating databases, and interacting with S3 and DynamoDB services.
+/// 
+/// Arguments:
+/// 
+/// * `args`: The `args` parameter in the `backup` function seems to be a struct or
+/// object containing configuration settings or parameters required for the backup
+/// operation. It likely includes information such as the bucket name, DynamoDB
+/// table name, minimum storage duration, and possibly other settings needed for
+/// interacting with AWS services and databases
+/// * `conn`: The `conn` parameter in the `backup` function is a mutable reference
+/// to a `PgConnection`, which represents a connection to a PostgreSQL database.
+/// This connection is used to interact with the database to perform operations like
+/// querying for files, updating records, and deleting entries during the backup
+/// process.
+/// * `s3_client`: The `s3_client` parameter in the `backup` function is a reference
+/// to an S3 client that is used to interact with an Amazon Simple Storage Service
+/// (S3) bucket. This client is responsible for performing operations such as
+/// uploading files to S3, deleting files from S3, and
+/// * `dynamo_client`: The `dynamo_client` parameter in the `backup` function is an
+/// instance of the `DynamoClient` struct, which is used to interact with DynamoDB
+/// for storing and retrieving data related to hash trackers. This client is
+/// responsible for performing operations such as updating hash trackers in DynamoDB
+/// and retrieving
 pub async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoClient) -> (usize, usize) {
 
     // Keeps track of files that still exist locally
@@ -246,6 +297,30 @@ pub async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, 
     (num_changes - failures, failures)
 }
 
+/// The function `get_hash_tracker_change` retrieves or creates a
+/// `HashTrackerChange` object for a given hash from a HashMap.
+/// 
+/// Arguments:
+/// 
+/// * `args`: The `args` parameter is a reference to a struct or object that
+/// contains various configuration or input arguments needed for the function to
+/// operate. It likely includes information such as the DynamoDB table name, minimum
+/// storage duration, and possibly other settings required for the function's logic.
+/// * `dynamo_client`: The `dynamo_client` parameter in the function
+/// `get_hash_tracker_change` is a reference to a `DynamoClient` instance. This
+/// parameter is used to interact with a DynamoDB database in order to retrieve or
+/// store data related to hash tracking. The `DynamoClient` likely provides methods
+/// * `hash_tracker_changes`: The `hash_tracker_changes` parameter is a mutable
+/// reference to a `HashMap` that stores `String` keys and `HashTrackerChange`
+/// values. This HashMap is used to keep track of changes related to a specific hash
+/// value. The function `get_hash_tracker_change` checks if the provided `hash
+/// * `hash`: The `hash` parameter is a string that represents the unique identifier
+/// of a hash value.
+/// 
+/// Returns:
+/// 
+/// A mutable reference to the `HashTrackerChange` object corresponding to the
+/// provided `hash` key in the `hash_tracker_changes` HashMap is being returned.
 async fn get_hash_tracker_change<'a>(args: &Args, dynamo_client: &DynamoClient, hash_tracker_changes: &'a mut HashMap<String, HashTrackerChange>, hash: String) -> &'a mut HashTrackerChange {
 
     if !hash_tracker_changes.contains_key(&hash) {
@@ -276,4 +351,26 @@ async fn get_hash_tracker_change<'a>(args: &Args, dynamo_client: &DynamoClient, 
     }
 
     hash_tracker_changes.get_mut(&hash).unwrap()
+}
+
+/// The function `new_expiration` calculates a new expiration date based on the
+/// current time and a minimum storage duration in Rust.
+/// 
+/// Arguments:
+/// 
+/// * `min_storage_duration`: The `min_storage_duration` parameter in the
+/// `new_expiration` function represents the minimum duration in days for which an
+/// item should be stored before it expires. This value is used to calculate the
+/// expiration time by adding the specified number of days to the current time.
+/// 
+/// Returns:
+/// 
+/// A `DateTime<Utc>` value is being returned. The function `new_expiration`
+/// calculates a new expiration time based on the current time (`Utc::now()`) and a
+/// minimum storage duration provided as input.
+fn new_expiration(min_storage_duration: i64) -> DateTime<Utc> {
+    match Utc::now().checked_add_signed(Duration::days(min_storage_duration)) {
+        Some(time) => time,
+        None => DateTime::UNIX_EPOCH,
+    }
 }
