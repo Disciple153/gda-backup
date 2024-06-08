@@ -15,14 +15,7 @@ use glacier_sync::{
     models::LocalFile
 };
 
-use glacier_sync::backup::{
-    fix_pending_uploads,
-    fix_pending_updates,
-    fix_pending_deletes,
-    upload_new_files,
-    update_changed_files,
-    delete_missing_files,
-};
+use glacier_sync::backup::backup;
 
 use glacier_sync::restore;
 use glacier_sync::s3;
@@ -33,14 +26,6 @@ async fn main() -> Result<(), Error> {
 
     // ARGUMENTS
     let args = &Args::parse();
-
-    // VARIABLES
-    let mut successful_uploads: usize = 0;
-    let mut successful_updates: usize = 0;
-    let mut successful_deletes: usize = 0;
-    let mut failed_uploads: usize = 0;
-    let mut failed_updates: usize = 0;
-    let mut failed_deletes: usize = 0;
 
     // GET CONNECTIONS
     let conn: &mut PgConnection = &mut establish_connection(args);
@@ -64,52 +49,18 @@ async fn main() -> Result<(), Error> {
 
     // If glacier_state is empty, populate it from Glacier.
     if glacier_state_is_empty(conn) {
-        println!("Glacier state empty. Loading state from S3");
+        println!("Glacier state empty. Loading state from DynamoDB and S3...");
         let _ = restore::db_from_s3(args, conn, &s3_client, &dynamo_client).await;
     }
 
-    // UPLOAD NEW FILES
-
-    // Upload all new files
-    let (successes, failures) = upload_new_files(args, conn, s3_client, dynamo_client).await;
-    successful_uploads += successes;
-    failed_uploads += failures;
-    
-    // Update all changed files
-    let (successes, failures) = update_changed_files(args, conn, s3_client, dynamo_client).await;
-    successful_updates += successes;
-    failed_updates += failures;
-    
-    // Add delete markers to missing files
-    let (successes, failures) = delete_missing_files(args, conn, s3_client, dynamo_client).await;
-    successful_deletes += successes;
-    failed_deletes += failures;
-    
-    // FIX PENDING BACKUPS
-
-    // Upload all files in glacier state with null uploaded rows
-    let (successes, failures) = fix_pending_uploads(args, conn, s3_client, dynamo_client).await;
-    successful_uploads += successes;
-    failed_uploads += failures;
-
-    // Upsert all files in glacier state with mismatched modified and uploaded rows
-    let (successes, failures) = fix_pending_updates(args, conn, s3_client, dynamo_client).await;
-    successful_updates += successes;
-    failed_updates += failures;
-    
-    // Delete all files in glacier pending deletion
-    let (successes, failures) = fix_pending_deletes(args, conn, s3_client, dynamo_client).await;
-    successful_deletes += successes;
-    failed_deletes += failures;
+    // UPLOAD CHANGES
+    let (successes, failures) = backup(args, conn, s3_client, dynamo_client).await;
     
     // CLEAR STATE 
     clear_local_state(conn);
 
     // PRINT RESULTS
-    println!("Backup complete:
-Uploads: {successful_uploads} succeeded, {failed_uploads} failed.
-Updates: {successful_updates} succeeded, {failed_updates} failed.
-Deletes: {successful_deletes} succeeded, {failed_deletes} failed.");
+    println!("Backup complete: {successes} succeeded, {failures} failed.");
 
     Ok(())
 }

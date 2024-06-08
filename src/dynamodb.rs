@@ -1,5 +1,5 @@
+use std::collections::hash_set::Iter as SetIter;
 use std::collections::{HashMap, HashSet};
-use std::slice::Iter as SliceIter;
 
 use chrono::{
     DateTime,
@@ -48,7 +48,7 @@ pub async fn get_client() -> Client {
     Client::new(&config)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HashTracker {
     pub hash: String,
     pub expiration: DateTime<Utc>,
@@ -57,25 +57,29 @@ pub struct HashTracker {
 
 impl HashTracker {
 
-    pub fn new(hash: String) -> HashTracker {
+    pub fn new(hash: String, expiration: DateTime<Utc>) -> HashTracker {
 
         HashTracker {
             hash,
-            expiration: DateTime::UNIX_EPOCH,
+            expiration,
             file_names: HashSet::new(),
         }
     }
 
     fn import(hash: String, expiration: DateTime<Utc>, file_names: Vec<String>) -> HashTracker { 
 
-        HashTracker {
+        let mut hash_tracker = HashTracker {
             hash,
             expiration,
-            file_names,
-        }
+            file_names: file_names.iter().cloned().collect(),
+        };
+
+        hash_tracker.del_file_name(NONE_STR.to_string());
+
+        hash_tracker
     }
 
-    pub fn files(&self) -> SliceIter<'_, String> {
+    pub fn files(&self) -> SetIter<'_, String> {
         self.file_names.iter()
     }
 
@@ -89,11 +93,11 @@ impl HashTracker {
         let file_names = result.get(FILE_NAMES_KEY)?.as_ss().ok()?;
         let expiration = result.get(EXPIRATION_KEY)?.as_s().ok()?.parse().ok()?;
 
-        let mut hash_tracker = HashTracker {
+        let mut hash_tracker = HashTracker::import (
             hash,
-            file_names: file_names.iter().cloned().collect(),
             expiration,
-        };
+            file_names.clone(),
+        );
 
         hash_tracker.del_file_name(NONE_STR.to_string());
 
@@ -166,11 +170,11 @@ impl HashTracker {
     }
 
     pub fn add_file_name(&mut self, file_name: String) {
-        self.file_names.remove(&file_name);
+        self.file_names.insert(file_name);
     }
 
     pub fn del_file_name(&mut self, file_name: String) {
-        self.file_names.insert(file_name);
+        self.file_names.remove(&file_name);
     }
 
     pub fn has_files(&self) -> bool {

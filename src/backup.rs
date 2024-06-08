@@ -1,6 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use futures::future;
 
 use crate::dynamodb::HashTracker;
 use crate::environment::Args;
@@ -36,20 +35,9 @@ use checksums::Algorithm::BLAKE2S as HASH_ALGO;
 
 fn new_expiration(min_storage_duration: i64) -> DateTime<Utc> {
     match Utc::now().checked_add_signed(Duration::days(min_storage_duration)) {
-        Some(e) => e,
+        Some(time) => time,
         None => DateTime::UNIX_EPOCH,
     }
-}
-
-async fn get_old_hash_tracker(args: &Args, s3_client: &S3Client, dynamo_client: &DynamoClient, file: GlacierFile) -> Option<HashTracker> {
-    let mut hash_tracker = HashTracker::get(dynamo_client, args.dynamo_table.clone(), file.file_hash.clone()?).await?;
-    hash_tracker.del_file_name(file.file_path);
-
-    if !hash_tracker.has_files() {
-        let _ = s3::delete(s3_client, args.bucket_name.clone(), file.file_hash?);
-    };
-
-    Some(hash_tracker)
 }
 
 struct FileChange {
@@ -57,12 +45,12 @@ struct FileChange {
     old_hash: Option<String>,
 }
 
+#[derive(Clone, Debug)]
 struct HashTrackerChange {
     new: HashTracker,
     old: HashTracker,
     created_files: Vec<GlacierFile>,
     deleted_files: Vec<GlacierFile>,
-    failed: bool,
 }
 
 impl HashTrackerChange {
@@ -72,7 +60,16 @@ impl HashTrackerChange {
 }
 
 
-async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoClient) -> Option<()> {
+pub async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoClient) -> (usize, usize) {
+
+    // Keeps track of files that still exist locally
+    let mut existing_g_files: HashSet<String> = HashSet::new();
+
+    // Keeps track of GlacierFiles that have been saved to the local database
+    let mut saved_g_files: HashSet<String> = HashSet::new();
+
+    // Keeps track of GlacierFiles that have been deleted from the local database
+    let mut deleted_g_files: HashSet<String> = HashSet::new();
 
     // Get all changes
     let file_changes: Vec<FileChange> = 
@@ -124,6 +121,7 @@ async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, dyna
             let h_t_c = get_hash_tracker_change(args,  dynamo_client, &mut hash_tracker_changes, hash).await;
             h_t_c.new.add_file_name(file_change.g_file.file_path.clone());
             h_t_c.created_files.push(file_change.g_file.clone());
+            existing_g_files.insert(file_change.g_file.file_path.clone());
         };
 
         // If a file version was deleted 
@@ -134,77 +132,99 @@ async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, dyna
         };
     };
 
-    // Publish S3 changes
-    let hash_tracker_changes: Vec<&mut HashTrackerChange> = future::join_all(hash_tracker_changes.iter_mut().map(|(hash, hash_tracker_change)| async {
+    let num_changes = hash_tracker_changes.len();
+    let mut failures = 0;
+
+    // Make all updates in the order S3 -> DynamoDB -> PostgreSQL, and continue on any failure
+    for (hash, mut hash_tracker_change) in hash_tracker_changes {
         
         if hash_tracker_change.changed() {
+
+            // Publish S3 changes
 
             // Delete
             if hash_tracker_change.old.has_files() {
                 if !hash_tracker_change.new.has_files() {
-                    // TODO delete
-                    s3::delete(s3_client, args.bucket_name.clone(), hash.clone()).await.ok()?;
+                    println!("Deleting hash: {} from S3.", hash.clone());
+                    let Ok(_) = s3::delete(s3_client, args.bucket_name.clone(), hash.clone()).await 
+                        else { failures += 1; continue; };
                 }
             }
 
             // Put
             else if hash_tracker_change.old.is_expired() {
                 if hash_tracker_change.new.has_files() {
-                    // TODO put
-                    let file_path = &hash_tracker_change.created_files.first()?.file_path;
-
-                    s3::put(s3_client, args.bucket_name.clone(), hash.clone(), file_path.to_string()).await.ok()?;
+                    println!("Uploading hash: {} to S3.", hash.clone());
+                    let Some(g_file) = hash_tracker_change.created_files.first() 
+                        else { failures += 1; continue; };
+                    let Ok(_) = s3::put(s3_client, args.bucket_name.clone(), hash.clone(), g_file.file_path.to_string()).await 
+                        else { failures += 1; continue; };
                 }
             }
 
             // Undelete
             else {
                 if hash_tracker_change.new.has_files() {
-                    s3::undelete(s3_client, args.bucket_name.clone(), hash.clone()).await.ok()?;
+                    println!("Undeleting hash: {} to S3.", hash.clone());
+                    let Ok(_) = s3::undelete(s3_client, args.bucket_name.clone(), hash.clone()).await 
+                        else { failures += 1; continue; };
                     hash_tracker_change.new.expiration = new_expiration(args.min_storage_duration.clone());
                 }
             }
+
+            // Publish HashTrackers
+            println!("Uploading hash tracker: {} to DynamoDB.", hash.clone());
+            let Ok(_) = hash_tracker_change.new.update(dynamo_client, args.dynamo_table.clone()).await 
+                else { failures += 1; continue; };
         }
 
-        Some(hash_tracker_change)
-    })).await.into_iter().flatten().collect();
-
-    // Publish HashTrackers 
-    let hash_tracker_changes: Vec<&mut HashTrackerChange> = future::join_all(hash_tracker_changes.into_iter().map(|hash_tracker_change| async {
-        if hash_tracker_change.changed() {
-            hash_tracker_change.new.update(dynamo_client, args.dynamo_table.clone()).await.ok()?;
+        // Publish GlacierFiles
+        for d_file in hash_tracker_change.deleted_files {
+            if !deleted_g_files.contains(&d_file.file_path) && !existing_g_files.contains(&d_file.file_path) {
+                println!("Deleting file entry: {} from local database.", d_file.file_path.clone());
+                d_file.delete(conn);
+                deleted_g_files.insert(d_file.file_path.clone());
+            }
         }
 
-        Some(hash_tracker_change)
-    })).await.into_iter().flatten().collect();
-
-    // Publish GlacierFiles
-    for hash_tracker_change in hash_tracker_changes {
-        for d_file in &hash_tracker_change.deleted_files {
-            d_file.delete(conn);
-        }
-
-        for d_file in &hash_tracker_change.created_files {
-            d_file.delete(conn);
+        for c_file in hash_tracker_change.created_files {
+            if !saved_g_files.contains(&c_file.file_path) {
+                println!("Inserting file entry: {} to local database.", c_file.file_path.clone());
+                c_file.insert(conn);
+                saved_g_files.insert(c_file.file_path.clone());
+            }
         }
     };
 
-    Some(())
+
+    (num_changes - failures, failures)
 }
 
 async fn get_hash_tracker_change<'a>(args: &Args, dynamo_client: &DynamoClient, hash_tracker_changes: &'a mut HashMap<String, HashTrackerChange>, hash: String) -> &'a mut HashTrackerChange {
+
     if !hash_tracker_changes.contains_key(&hash) {
-        let hash_tracker = HashTracker::get(dynamo_client, args.dynamo_table.clone(), hash.clone()).await
-            .unwrap_or(HashTracker::new(hash.clone()));
+
+        let new;
+        let old;
+        
+        match HashTracker::get(dynamo_client, args.dynamo_table.clone(), hash.clone()).await {
+            Some(hash_tracker) => {
+                new = hash_tracker.clone();
+                old = hash_tracker;
+            },
+            None => {
+                new = HashTracker::new(hash.clone(), new_expiration(args.min_storage_duration.clone()));
+                old = HashTracker::new(hash.clone(), DateTime::UNIX_EPOCH);
+            },
+        };
 
         hash_tracker_changes.insert(
             hash.clone(),
             HashTrackerChange {
-                new: hash_tracker.clone(),
-                old: hash_tracker,
+                new,
+                old,
                 created_files: vec![],
                 deleted_files: vec![],
-                failed: false,
             }
         );
     }

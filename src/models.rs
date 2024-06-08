@@ -3,20 +3,22 @@ use std::time::SystemTime;
 use crate::schema::glacier_state::dsl::*;
 use crate::schema::local_state::dsl::*;
 
-#[derive(Queryable, Selectable, Insertable)]
+use crate::schema::glacier_state::dsl::file_path as glacier_file_path;
+
+#[derive(Queryable, Selectable, Insertable, AsChangeset)]
 #[diesel(table_name = crate::schema::glacier_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GlacierFile {
     pub file_path: String,
     pub file_hash: Option<String>,
     pub modified: SystemTime,
 }
 
-#[derive(Queryable, Selectable, Insertable)]
+#[derive(Queryable, Selectable, Insertable, AsChangeset)]
 #[diesel(table_name = crate::schema::local_state)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LocalFile {
     pub file_path: String,
     pub modified: SystemTime,
@@ -39,11 +41,13 @@ impl LocalFile {
     }
 }
 
-
 impl GlacierFile {
     pub fn insert(&self, conn: &mut PgConnection) -> GlacierFile {
         diesel::insert_into(glacier_state)
             .values(self)
+            .on_conflict(glacier_file_path)
+            .do_update()
+            .set(self)
             .returning(GlacierFile::as_returning())
             .get_result(conn)
             .expect("Error saving new GlacierFile.")
