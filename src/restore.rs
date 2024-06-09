@@ -1,7 +1,9 @@
+use std::io::{Error, ErrorKind};
+
 use crate::dynamodb::HashTracker;
-use crate::environment::Args;
+use crate::environment::Cli;
 use crate::models::GlacierFile;
-use log::error;
+use log::{error, info};
 
 use crate::s3;
 use aws_sdk_dynamodb::Client as DynamoDbClient;
@@ -34,17 +36,17 @@ use diesel::prelude::PgConnection;
 /// Returns:
 /// 
 /// The function `db_from_s3` returns an `Option<()>`.
-pub async fn db_from_s3(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoDbClient) -> Option<()> {
+pub async fn db_from_s3(cli: Cli, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoDbClient) -> Option<()> {
     
-    if args.dry_run {
+    if cli.dry_run {
         return Some(())
     }
 
     // Get all objects in S3
-    let modified_times = s3::list(&s3_client, args.bucket_name.clone()).await.ok()?;
+    let modified_times = s3::list(&s3_client, cli.bucket_name.clone()).await.ok()?;
     
     // Get all objects in DynamoDB
-    let hash_trackers = HashTracker::get_all(dynamo_client, args.dynamo_table.clone()).await?;
+    let hash_trackers = HashTracker::get_all(dynamo_client, cli.dynamo_table.clone()).await?;
 
     // For every object in DynamoDB
     let _ = hash_trackers.iter().map(|hash_tracker| {
@@ -73,4 +75,34 @@ pub async fn db_from_s3(args: &Args, conn: &mut PgConnection, s3_client: &S3Clie
     });
 
     Some(())
+}
+
+pub async fn restore(cli: Cli, s3_client: &S3Client, dynamo_client: &DynamoDbClient) -> Result<(usize, usize), Error> {
+    
+    let mut restored = 0;
+    let mut failed = 0;
+
+    // Get all objects in DynamoDB
+    let hash_trackers = match HashTracker::get_all(dynamo_client, cli.dynamo_table.clone()).await {
+        Some(value) => value,
+        None => return Err(Error::new(ErrorKind::NotConnected, "Unable to connect to DynamoDB.")),
+    };
+
+    for hash_tracker in hash_trackers {
+
+        match s3::get_object(s3_client, cli.bucket_name.clone(), hash_tracker.hash.clone(), cli.target_dir.clone(), hash_tracker.files()).await {
+            Ok(files) => {
+                if files.len() > 0 {
+                    restored += files.len();
+                    info!("{} files successfully restored: {:?}", files.len(), files);
+                }
+            },
+            Err(error) => {
+                failed += hash_tracker.files().len();
+                error!("{} files failed to be restored: {:?}\nError: {:?}", hash_tracker.files().len(), hash_tracker, error);
+            },
+        };
+    };
+
+    Ok((restored, failed))
 }

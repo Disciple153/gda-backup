@@ -199,7 +199,7 @@ impl HashTracker {
 
             // Convert each valid item into a HashTracker
             .iter().map(|value| {
-                let hash = value.get(FILE_NAMES_KEY)?.as_s().ok()?.to_owned();
+                let hash = value.get(HASH_KEY)?.as_s().ok()?.to_owned();
                 let expiration= value.get(EXPIRATION_KEY)?.as_s().ok()?.parse().ok()?;
                 let file_names = value.get(FILE_NAMES_KEY)?.as_ss().ok()?.to_owned();
 

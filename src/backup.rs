@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use log::{debug, error};
+use walkdir::WalkDir;
 
 use crate::dynamodb::HashTracker;
-use crate::environment::Args;
-use crate::models::GlacierFile;
+use crate::environment::{BackupArgs, Cli};
+use crate::models::{GlacierFile, LocalFile};
 
 use crate::s3;
 
@@ -87,6 +88,38 @@ impl HashTrackerChange {
     }
 }
 
+/// The function `load` iterates through files in a directory, extracts metadata,
+/// and inserts file information into a database.
+/// 
+/// Arguments:
+/// 
+/// * `args`: The `args` parameter in the `load` function seems to be of type
+/// `BackupArgs`, which likely contains information or settings related to a backup
+/// operation. It is being used to access the `target_dir` field, which is a
+/// directory path where files are being loaded from.
+/// * `conn`: The `conn` parameter in the `load` function is a mutable reference to
+/// a `PgConnection`, which is a connection to a PostgreSQL database. This parameter
+/// allows the function to interact with the database to load data from the local
+/// file system into the database.
+pub fn load(cli: Cli, conn: &mut PgConnection) {
+    // Load local_state into database
+    for file in WalkDir::new(cli.target_dir.clone()).into_iter().filter_map(|e: Result<walkdir::DirEntry, walkdir::Error>| e.ok()) {
+
+        let Ok(metadata) = file.metadata() else {continue };
+
+        if metadata.is_file() {
+            let result = LocalFile {
+                file_path: file.path().display().to_string(),
+                modified: metadata.modified().expect("Error: OS does not support modified time metadata.")
+            }.insert(conn);
+
+            match result {
+                Ok(_) => (),
+                Err(error) => error!("Failed to load file into local database: {:?}\n Error: {}", file, error),
+            }
+        }
+    }
+}
 
 /// The `backup` function in Rust asynchronously manages file backups by tracking
 /// changes, updating databases, and interacting with S3 and DynamoDB services.
@@ -112,7 +145,7 @@ impl HashTrackerChange {
 /// for storing and retrieving data related to hash trackers. This client is
 /// responsible for performing operations such as updating hash trackers in DynamoDB
 /// and retrieving
-pub async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoClient) -> (usize, usize) {
+pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoClient) -> (usize, usize) {
 
     // Keeps track of files that still exist locally
     let mut existing_g_files: HashSet<String> = HashSet::new();
@@ -170,7 +203,7 @@ pub async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, 
 
         // If a file version was created 
         if let Some(hash) = file_change.g_file.file_hash.clone() { 
-            let h_t_c = get_hash_tracker_change(args,  dynamo_client, &mut hash_tracker_changes, hash).await;
+            let h_t_c = get_hash_tracker_change(cli.clone(), args.clone(),  dynamo_client, &mut hash_tracker_changes, hash).await;
             h_t_c.new.add_file_name(file_change.g_file.file_path.clone());
             h_t_c.created_files.push(file_change.g_file.clone());
             existing_g_files.insert(file_change.g_file.file_path.clone());
@@ -178,7 +211,7 @@ pub async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, 
 
         // If a file version was deleted 
         if let Some(hash) = file_change.old_hash {
-            let h_t_c = get_hash_tracker_change(args,  dynamo_client, &mut hash_tracker_changes, hash).await;
+            let h_t_c = get_hash_tracker_change(cli.clone(), args.clone(),  dynamo_client, &mut hash_tracker_changes, hash).await;
             h_t_c.new.del_file_name(file_change.g_file.file_path.clone());
             h_t_c.deleted_files.push(file_change.g_file.clone());
         };
@@ -198,7 +231,7 @@ pub async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, 
             if hash_tracker_change.old.has_files() {
                 if !hash_tracker_change.new.has_files() {
                     debug!("Deleting hash: {} from S3.", hash.clone());
-                    match s3::delete(s3_client, args.bucket_name.clone(), hash.clone()).await {
+                    match s3::delete(s3_client, cli.bucket_name.clone(), hash.clone()).await {
                         Ok(_) => (),
                         Err(error) => {
                             error!("Failed to delete file from S3: {:?}\n Error: {}", hash_tracker_change, error);
@@ -222,7 +255,7 @@ pub async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, 
                             continue;
                         }
                     };
-                    match s3::put(s3_client, args.bucket_name.clone(), hash.clone(), g_file.file_path.to_string()).await {
+                    match s3::put(s3_client, cli.bucket_name.clone(), hash.clone(), g_file.file_path.to_string()).await {
                         Ok(_) => (),
                         Err(error) => {
                             error!("Failed to upload file to S3: {:?}\n Error: {}", hash_tracker_change, error);
@@ -237,7 +270,7 @@ pub async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, 
             else {
                 if hash_tracker_change.new.has_files() {
                     debug!("Undeleting hash: {} to S3.", hash.clone());
-                    match s3::undelete(s3_client, args.bucket_name.clone(), hash.clone()).await {
+                    match s3::restore(s3_client, cli.bucket_name.clone(), hash.clone()).await {
                         Ok(_) => (),
                         Err(error) => {
                             error!("Failed to remove delete marker from file in S3: {:?}\n Error: {}", hash_tracker_change, error);
@@ -251,7 +284,7 @@ pub async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, 
 
             // Publish HashTrackers
             debug!("Uploading hash tracker: {} to DynamoDB.", hash.clone());
-            match hash_tracker_change.new.update(dynamo_client, args.dynamo_table.clone()).await {
+            match hash_tracker_change.new.update(dynamo_client, cli.dynamo_table.clone()).await {
                 Ok(_) => (),
                 Err(error) => {
                     error!("Failed to upload hash tracker to DynamoDB: {:?}\n Error: {}", hash_tracker_change, error);
@@ -321,14 +354,14 @@ pub async fn backup(args: &Args, conn: &mut PgConnection, s3_client: &S3Client, 
 /// 
 /// A mutable reference to the `HashTrackerChange` object corresponding to the
 /// provided `hash` key in the `hash_tracker_changes` HashMap is being returned.
-async fn get_hash_tracker_change<'a>(args: &Args, dynamo_client: &DynamoClient, hash_tracker_changes: &'a mut HashMap<String, HashTrackerChange>, hash: String) -> &'a mut HashTrackerChange {
+async fn get_hash_tracker_change<'a>(cli: Cli, args: BackupArgs, dynamo_client: &DynamoClient, hash_tracker_changes: &'a mut HashMap<String, HashTrackerChange>, hash: String) -> &'a mut HashTrackerChange {
 
     if !hash_tracker_changes.contains_key(&hash) {
 
         let new;
         let old;
         
-        match HashTracker::get(dynamo_client, args.dynamo_table.clone(), hash.clone()).await {
+        match HashTracker::get(dynamo_client, cli.dynamo_table.clone(), hash.clone()).await {
             Some(hash_tracker) => {
                 new = hash_tracker.clone();
                 old = hash_tracker;

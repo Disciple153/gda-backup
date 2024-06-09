@@ -1,7 +1,6 @@
 # TODO
 
 ## Road map
-- Document functions
 - Use regex to filter out files from being backed up
 - Encryption
 - Environment variables
@@ -12,6 +11,8 @@
 - Document recommended bucket settings
 
 - Compress files to be uploaded 
+- Restore specific files
+- Document functions (for real)
 
 ### Tasks
 

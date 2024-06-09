@@ -1,8 +1,6 @@
+use std::collections::hash_set::Iter as SetIter;
 use std::{
-    collections::HashMap, 
-    io::Error, 
-    path::Path, 
-    time::SystemTime
+    collections::HashMap, fs::{self, File, create_dir_all}, io::{Error as IoError, Write}, path::Path, time::SystemTime
 };
 use aws_sdk_s3::{
     error::SdkError,
@@ -10,24 +8,38 @@ use aws_sdk_s3::{
         delete_object::{
             DeleteObjectError, 
             DeleteObjectOutput
-        }, 
-        list_object_versions::ListObjectVersionsError, 
-        list_objects_v2::{
+        }, get_object::GetObjectError, list_objects_v2::{
             ListObjectsV2Error, 
             ListObjectsV2Output
-        },
-        put_object::{
+        }, put_object::{
             PutObjectError,
             PutObjectOutput
-        }
+        }, restore_object::{RestoreObjectError, RestoreObjectOutput}
     },
     primitives::ByteStream,
     Client,
 };
 use aws_smithy_runtime_api::http::Response;
-use futures::{stream::FuturesUnordered, StreamExt};
+use aws_sdk_s3::primitives::SdkBody;
+use aws_smithy_types::byte_stream::error::Error as AwsSmithyError;
 
 use crate::aws;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum S3GetError {
+    #[error("S3GetObjectError")]
+    S3GetObjectError(#[from] SdkError<GetObjectError, Response<SdkBody>>),
+
+    #[error("IoError")]
+    IoError(#[from] IoError),
+
+    #[error("AwsSmithyError")]
+    AwsSmithyError(#[from] AwsSmithyError),
+
+    #[error("S3GetError")]
+    S3GetError(String),
+}
 
 /// The function `get_buckets` retrieves a list of S3 buckets using the AWS SDK for
 /// Rust.
@@ -42,7 +54,7 @@ use crate::aws;
 /// 
 /// The function `get_buckets` returns a `Result` containing a vector of
 /// `aws_sdk_s3::types::Bucket` objects or an `Error` in case of failure.
-pub async fn get_buckets(client: &Client) -> Result<Vec<aws_sdk_s3::types::Bucket>, Error> {
+pub async fn get_buckets(client: &Client) -> Result<Vec<aws_sdk_s3::types::Bucket>, AwsSmithyError> {
     let resp: aws_sdk_s3::operation::list_buckets::ListBucketsOutput = client.list_buckets().send().await.expect("list_buckets failed");
     Ok(resp.buckets().to_vec())
 }
@@ -84,7 +96,7 @@ pub async fn get_client() -> Client {
 /// 
 /// The `put` function returns a `Result` containing either a `PutObjectOutput` or
 /// an `SdkError` with a `PutObjectError`.
-pub async fn put(client: &Client, bucket_name: String, key: String, file_path: String,) -> Result<PutObjectOutput, SdkError<PutObjectError>> {
+pub async fn put(client: &Client, bucket_name: String, key: String, file_path: String) -> Result<PutObjectOutput, SdkError<PutObjectError>> {
 
     let body = ByteStream::from_path(Path::new(&file_path)).await;
     client
@@ -127,44 +139,69 @@ pub async fn delete(client: &Client, bucket: String, key: String) -> Result<Dele
         .await
 }
 
-/// The `undelete` function in Rust asynchronously deletes all delete marker
-/// versions of an object in a specified bucket.
+
+/// The `restore` function in Rust asynchronously restores an object in a bucket
+/// using the AWS SDK for Rust.
 /// 
 /// Arguments:
 /// 
-/// * `client`: The `client` parameter is an instance of the `Client` struct, which
-/// is used to interact with the AWS S3 service. It contains the necessary
-/// configuration and credentials to make requests to the S3 API.
-/// * `bucket`: The `bucket` parameter in the `undelete` function represents the
-/// name of the bucket from which you want to undelete the object. It is a String
-/// type that specifies the bucket where the object to be undeleted is located.
-/// * `key`: The `key` parameter in the `undelete` function represents the unique
-/// identifier of the object that you want to undelete from the specified S3 bucket.
-/// It is used to identify the specific object that was previously deleted and needs
-/// to be restored.
+/// * `client`: The `client` parameter is an instance of the AWS SDK `Client`
+/// struct, which is used to interact with AWS services. In this case, it is being
+/// used to restore an object from a specified bucket.
+/// * `bucket`: The `bucket` parameter is a string that represents the name of the
+/// bucket where the object to be restored is located.
+/// * `key`: The `key` parameter in the `restore` function represents the unique
+/// identifier or name of the object that you want to restore from the specified
+/// bucket. It is used to locate the specific object within the bucket for
+/// restoration.
 /// 
 /// Returns:
 /// 
-/// The `undelete` function returns a `Result` with the success case containing an
-/// empty tuple `()` and the error case containing a `SdkError` with the specific
-/// error type `ListObjectVersionsError` and the response associated with the error.
-pub async fn undelete(client: &Client, bucket: String, key: String) -> Result<(), SdkError<ListObjectVersionsError, Response>> {
-    let delete_futures = FuturesUnordered::new();
+/// The `restore` function returns a `Result` containing either a
+/// `RestoreObjectOutput` on success or an `SdkError` on failure, which includes a
+/// `RestoreObjectError` and a `Response`.
+pub async fn restore(client: &Client, bucket: String, key: String) -> Result<RestoreObjectOutput, SdkError<RestoreObjectError, Response>> {
+    client.restore_object()
+        .bucket(bucket)
+        .key(key)
+        .send()
+        .await
+}
+
+pub async fn get_object<'a>(client: &Client, bucket: String, key: String, prefix: String, file_paths: SetIter<'a, String>) -> Result<Vec<String>, S3GetError> {
+
+    if file_paths.len() == 0 {
+        return Ok(vec![]);
+    }
     
-    let dm_versions = get_delete_marker_versions(client, bucket.clone(), key.clone()).await?;
+    let files: Vec<String> = file_paths.map(|s| s.clone()).collect();
+    
+    let first_file = prefix.clone() + &files[0];
+    let (first_dir, _) = first_file.rsplit_once('/').unwrap();
+    
+    create_dir_all(first_dir)?;
+    let mut file = File::create(first_file.clone())?;
+    
+    let mut object = client
+        .get_object()
+        .bucket(bucket)
+        .key(key)
+        .send()
+        .await?;
+    
+    while let Some(bytes) = object.body.try_next().await? {
+        file.write_all(&bytes)?;
+    }
+    
+    for i in 1..files.len() {
+        let file = prefix.clone() + &files[i];
+        let (dir, _) = file.rsplit_once('/').unwrap();
 
-    for version in dm_versions {
-        delete_futures.push(client
-            .delete_object()
-            .bucket(bucket.clone())
-            .key(key.clone())
-            .version_id(version)
-            .send());
-    };
+        create_dir_all(dir)?;
+        fs::copy(first_file.clone(), file)?;
+    }
 
-    let _: Vec<_> = delete_futures.collect().await;
-
-    Ok(())
+    Ok(files)
 }
 
 /// The function `list_objects` asynchronously lists objects in a specified bucket
@@ -185,7 +222,7 @@ pub async fn undelete(client: &Client, bucket: String, key: String) -> Result<()
 /// Returns:
 /// 
 /// The `list_objects` function returns a `Result<(), Error>`.
-pub async fn list_objects(client: &Client, bucket: &str) -> Result<(), Error> {
+pub async fn list_objects(client: &Client, bucket: &str) -> Result<(), AwsSmithyError> {
     let mut response = client
         .list_objects_v2()
         .bucket(bucket.to_owned())
@@ -257,47 +294,3 @@ pub async fn list(client: &Client, bucket: String) -> Result<HashMap<String, Sys
     Ok(output)
 }
 
-/// The function `get_delete_marker_versions` in Rust retrieves and returns a list
-/// of version IDs for delete markers associated with a specific object key in a
-/// bucket.
-/// 
-/// Arguments:
-/// 
-/// * `client`: The `client` parameter is an instance of the `Client` struct, which
-/// is used to interact with the AWS S3 service. It provides methods for performing
-/// operations like listing object versions in a bucket.
-/// * `bucket`: The `bucket` parameter in the function `get_delete_marker_versions`
-/// represents the name of the bucket in which you want to search for delete marker
-/// versions. Buckets are containers for objects stored in Amazon S3 or other cloud
-/// storage services. In this context, the `bucket` parameter specifies the specific
-/// * `key`: The `key` parameter in the function `get_delete_marker_versions`
-/// represents the object key for which you want to retrieve delete marker versions.
-/// In an object storage system like Amazon S3, the key is a unique identifier for
-/// an object within a bucket. It is used to locate and access the specific
-/// 
-/// Returns:
-/// 
-/// The function `get_delete_marker_versions` returns a `Result` containing a
-/// `Vec<String>` of version IDs or an error of type
-/// `SdkError<ListObjectVersionsError, Response>`.
-async fn get_delete_marker_versions(client: &Client, bucket: String, key: String,) -> Result<Vec<String>, SdkError<ListObjectVersionsError, Response>> {
-    let empty_vec = vec![];
-
-    let mut output = Vec::new();
-
-    let result = client
-        .list_object_versions()
-        .bucket(bucket.to_owned())
-        .prefix(key)
-        .max_keys(1)
-        .send().await?;
-
-    for delete_marker in result.delete_markers.unwrap_or(empty_vec) {
-        match delete_marker.version_id {
-            Some(version_id) => output.push(version_id),
-            None => (),
-        };
-    };
-
-    Ok(output)
-}
