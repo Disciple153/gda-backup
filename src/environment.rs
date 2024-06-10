@@ -23,6 +23,9 @@ pub enum Commands {
 
     /// Restores files
     Restore(RestoreArgs),
+    
+    /// Cleans up dangling dynamo entries
+    CleanDynamo(CleanDynamoArgs),
 
     /// Clears the local database
     ClearDatabase(ClearDatabaseArgs),
@@ -67,6 +70,12 @@ pub struct RestoreArgs {
     bucket_name: String,
     #[arg(short = 'd', long)]
     dynamo_table: String,
+}
+
+#[derive(Args, Clone)]
+pub struct CleanDynamoArgs {
+    #[arg(short = 'd', long)]
+    pub dynamo_table: String,
 }
 
 #[derive(Args, Clone)]

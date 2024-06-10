@@ -9,8 +9,7 @@ use log::{LevelFilter, error, info};
 use env_logger::Builder;
 
 use gda_backup::environment::{
-    Cli,
-    Commands,
+    AwsArgs, Cli, Commands
 };
 
 use gda_backup::{
@@ -52,10 +51,6 @@ async fn main() -> Result<(), Error> {
             // FIX ARGUMENTS
             args.target_dir = fix_target_dir(args.target_dir.clone())?;
 
-            for filter in args.filter.clone() {
-                dbg!(filter);
-            };
-            
             // Connect to local database
             let conn: &mut PgConnection = &mut establish_connection(args.clone().into());
             
@@ -90,6 +85,19 @@ async fn main() -> Result<(), Error> {
                 Err(error) => error!("Restore failed: {:?}", error),
             }
         },
+        Commands::CleanDynamo(ref mut args) => {
+            let aws_args = AwsArgs {
+                bucket_name: "".to_string(),
+                dynamo_table: args.dynamo_table.clone()
+            };
+            
+            let hash_trackers = HashTracker::get_all(&dynamo_client, aws_args.clone())
+                .await.unwrap_or(vec![]);
+        
+            for hash_tracker in hash_trackers {
+                let _ = hash_tracker.update(aws_args.clone(), &dynamo_client).await;
+            }
+        }
         Commands::ClearDatabase(args) => {
             // Connect to local database
             let conn: &mut PgConnection = &mut establish_connection(args.clone().into());

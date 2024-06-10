@@ -360,6 +360,24 @@ impl HashTracker {
         self.expiration < Utc::now()
     }
 
+    /// The function permanently deletes all hash trackers using AWS DynamoDB.
+    /// 
+    /// Arguments:
+    /// 
+    /// * `aws_args`: The `aws_args` parameter is of type `AwsArgs` and contains the
+    /// necessary arguments for interacting with AWS services. It likely includes
+    /// information such as AWS credentials, region, and other configurations
+    /// required for accessing AWS resources.
+    /// * `client`: The `client` parameter in the function `permanently_delete_all`
+    /// is likely an HTTP client or a database client that is used to make requests
+    /// to a server or database. It is passed as a reference to the function,
+    /// indicating that the function will use this client to interact with some
+    /// external service
+    /// 
+    /// Returns:
+    /// 
+    /// The function `permanently_delete_all` returns a `Result` with the success
+    /// type `()` (unit type) and the error type `HashTrackerError`.
     pub async fn permanently_delete_all(aws_args: AwsArgs, client: &Client) -> Result<(), HashTrackerError> {
         let hash_trackers = HashTracker::get_all(client, aws_args.clone()).await.unwrap();
 
