@@ -9,6 +9,7 @@
     - image
     - compose file
 - Document recommended bucket settings
+- Add messages to restore and delete warning of potential charges
 
 - Compress files to be uploaded 
 - Restore specific files

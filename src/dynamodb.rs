@@ -7,6 +7,7 @@ use chrono::{
 };
 
 use crate::aws;
+use crate::environment::AwsArgs;
 
 use aws_sdk_dynamodb::Client;
 use aws_sdk_dynamodb::operation::get_item::GetItemError;
@@ -76,6 +77,14 @@ pub struct HashTracker {
     pub expiration: DateTime<Utc>,
     file_names: HashSet<String>,
 }
+
+impl PartialEq for HashTracker {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash &&
+        self.file_names == other.file_names
+    }
+}
+impl Eq for HashTracker {}
 
 impl HashTracker {
 
@@ -165,10 +174,10 @@ impl HashTracker {
     /// Returns:
     /// 
     /// The function `get` returns an `Option` containing a `HashTracker` struct.
-    pub async fn get(client: &Client, table_name: String, hash: String) -> Option<HashTracker> {
+    pub async fn get(aws_args: AwsArgs, client: &Client, hash: String) -> Option<HashTracker> {
 
         let result = client.get_item()
-            .table_name(table_name)
+            .table_name(aws_args.dynamo_table)
             .key(HASH_KEY, AttributeValue::S(hash.clone()))
             .send().await.ok()?.item?;
 
@@ -190,10 +199,10 @@ impl HashTracker {
     /// responsible for retrieving all items from a specified table in a DynamoDB
     /// database and converting them into a collection of `HashTracker` instances.
     /// Here is a breakdown of what the function is doing:
-    pub async fn get_all(client: &Client, table_name: String) -> Option<Vec<HashTracker>> {
+    pub async fn get_all(client: &Client, aws_args: AwsArgs) -> Option<Vec<HashTracker>> {
         Some(client
             // Get all items in given table
-            .scan().table_name(table_name)
+            .scan().table_name(aws_args.dynamo_table)
             .into_paginator().items().send()
             .collect::<Result<Vec<HashMap<String, AttributeValue>>, _>>().await.ok()?
 
@@ -293,12 +302,12 @@ impl HashTracker {
     /// Returns:
     /// 
     /// The `update` function is returning a `Result<(), HashTrackerError>`.
-    pub async fn update(&self, client: &Client, table_name: String) -> Result<(), HashTrackerError> {
+    pub async fn update(&self, aws_args: AwsArgs, client: &Client) -> Result<(), HashTrackerError> {
         if !self.has_files() && self.is_expired() {
-            self.delete(client, table_name).await?;
+            self.delete(client, aws_args.dynamo_table).await?;
         }
         else {
-            self.put(client, table_name).await?;
+            self.put(client, aws_args.dynamo_table).await?;
         }
 
         Ok(())
@@ -350,12 +359,14 @@ impl HashTracker {
     pub fn is_expired(&self) -> bool {
         self.expiration < Utc::now()
     }
-}
 
-impl PartialEq for HashTracker {
-    fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash &&
-        self.file_names == other.file_names
+    pub async fn permanently_delete_all(aws_args: AwsArgs, client: &Client) -> Result<(), HashTrackerError> {
+        let hash_trackers = HashTracker::get_all(client, aws_args.clone()).await.unwrap();
+
+        for hash_tracker in hash_trackers {
+            let _ = hash_tracker.delete(client, aws_args.dynamo_table.clone()).await?;
+        }
+
+        Ok(())
     }
 }
-impl Eq for HashTracker {}

@@ -1,7 +1,7 @@
 use std::io::{Error, ErrorKind};
 
-use crate::dynamodb::HashTracker;
-use crate::environment::Cli;
+use crate::{dynamodb::HashTracker, environment::RestoreArgs};
+use crate::environment::{BackupArgs, Cli};
 use crate::models::GlacierFile;
 use log::{error, info};
 
@@ -36,17 +36,17 @@ use diesel::prelude::PgConnection;
 /// Returns:
 /// 
 /// The function `db_from_s3` returns an `Option<()>`.
-pub async fn db_from_s3(cli: Cli, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoDbClient) -> Option<()> {
+pub async fn db_from_aws(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoDbClient) -> Option<()> {
     
     if cli.dry_run {
         return Some(())
     }
 
     // Get all objects in S3
-    let modified_times = s3::list(&s3_client, cli.bucket_name.clone()).await.ok()?;
+    let modified_times = s3::list(&s3_client, args.clone().into()).await.ok()?;
     
     // Get all objects in DynamoDB
-    let hash_trackers = HashTracker::get_all(dynamo_client, cli.dynamo_table.clone()).await?;
+    let hash_trackers = HashTracker::get_all(dynamo_client, args.clone().into()).await?;
 
     // For every object in DynamoDB
     let _ = hash_trackers.iter().map(|hash_tracker| {
@@ -77,20 +77,44 @@ pub async fn db_from_s3(cli: Cli, conn: &mut PgConnection, s3_client: &S3Client,
     Some(())
 }
 
-pub async fn restore(cli: Cli, s3_client: &S3Client, dynamo_client: &DynamoDbClient) -> Result<(usize, usize), Error> {
+/// The `restore` function in Rust asynchronously restores files from an S3 bucket
+/// based on data stored in DynamoDB, tracking successful and failed restorations.
+/// 
+/// Arguments:
+/// 
+/// * `cli`: The `cli` parameter in the `restore` function is of type `Cli`, which
+/// likely contains configuration settings and options for the restoration process.
+/// It may include information such as the DynamoDB table name, S3 bucket name,
+/// target directory for restored files, and other relevant settings needed for the
+/// restoration
+/// * `s3_client`: The `s3_client` parameter in the `restore` function is a
+/// reference to an instance of the S3Client struct, which is used to interact with
+/// an Amazon S3 service. This client is responsible for performing operations such
+/// as uploading, downloading, and managing objects in an S3 bucket.
+/// * `dynamo_client`: The `dynamo_client` parameter in the `restore` function is of
+/// type `&DynamoDbClient`, which is a reference to a client for interacting with
+/// DynamoDB. This client is used to perform operations on the DynamoDB table
+/// specified in the `cli` parameter.
+/// 
+/// Returns:
+/// 
+/// The `restore` function is returning a `Result` containing a tuple with two
+/// elements: the number of files successfully restored (`restored`) and the number
+/// of files that failed to be restored (`failed`).
+pub async fn restore(cli: Cli, args: RestoreArgs, s3_client: &S3Client, dynamo_client: &DynamoDbClient) -> Result<(usize, usize), Error> {
     
     let mut restored = 0;
     let mut failed = 0;
 
     // Get all objects in DynamoDB
-    let hash_trackers = match HashTracker::get_all(dynamo_client, cli.dynamo_table.clone()).await {
+    let hash_trackers = match HashTracker::get_all(dynamo_client, args.clone().into()).await {
         Some(value) => value,
         None => return Err(Error::new(ErrorKind::NotConnected, "Unable to connect to DynamoDB.")),
     };
 
     for hash_tracker in hash_trackers {
 
-        match s3::get_object(s3_client, cli.bucket_name.clone(), hash_tracker.hash.clone(), cli.target_dir.clone(), hash_tracker.files()).await {
+        match s3::get_object(cli.clone(), args.clone().into(), s3_client, hash_tracker.hash.clone(), args.target_dir.clone(), hash_tracker.files()).await {
             Ok(files) => {
                 if files.len() > 0 {
                     restored += files.len();

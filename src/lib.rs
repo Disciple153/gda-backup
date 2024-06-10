@@ -11,7 +11,7 @@ use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use diesel::result::Error;
 use dotenvy::dotenv;
-use environment::BackupArgs;
+use environment::DatabaseArgs;
 use models::{GlacierFile, LocalFile};
 
 use crate::schema::glacier_state::dsl::{
@@ -41,7 +41,7 @@ joinable!(crate::schema::local_state -> crate::schema::glacier_state (file_path)
 /// 
 /// The function `establish_connection` returns a `PgConnection` object, which
 /// represents a connection to a PostgreSQL database.
-pub fn establish_connection(args: BackupArgs) -> PgConnection {
+pub fn establish_connection(args: DatabaseArgs) -> PgConnection {
     dotenv().ok();
 
     let db_engine = args.db_engine.clone();

@@ -2,6 +2,8 @@ use std::collections::hash_set::Iter as SetIter;
 use std::{
     collections::HashMap, fs::{self, File, create_dir_all}, io::{Error as IoError, Write}, path::Path, time::SystemTime
 };
+use aws_sdk_s3::operation::list_object_versions::ListObjectVersionsError;
+use aws_sdk_s3::types::{Delete, ObjectIdentifier};
 use aws_sdk_s3::{
     error::SdkError,
     operation::{
@@ -24,7 +26,12 @@ use aws_sdk_s3::primitives::SdkBody;
 use aws_smithy_types::byte_stream::error::Error as AwsSmithyError;
 
 use crate::aws;
+use crate::environment::{AwsArgs, Cli};
 use thiserror::Error;
+
+use aws_sdk_s3::error::BuildError;
+use aws_sdk_s3::operation::delete_objects::DeleteObjectsError;
+use log::info;
 
 #[derive(Error, Debug)]
 pub enum S3GetError {
@@ -39,6 +46,18 @@ pub enum S3GetError {
 
     #[error("S3GetError")]
     S3GetError(String),
+}
+
+#[derive(Error, Debug)]
+pub enum S3DeleteError {
+    #[error("S3ListObjectsError")]
+    S3ListObjectsError(#[from] SdkError<ListObjectVersionsError, Response>),
+
+    #[error("S3DeleteObjectsError")]
+    S3DeleteObjectsError(#[from] SdkError<DeleteObjectsError, Response>),
+
+    #[error("S3BuildError")]
+    S3BuildError(#[from] BuildError),
 }
 
 /// The function `get_buckets` retrieves a list of S3 buckets using the AWS SDK for
@@ -96,12 +115,12 @@ pub async fn get_client() -> Client {
 /// 
 /// The `put` function returns a `Result` containing either a `PutObjectOutput` or
 /// an `SdkError` with a `PutObjectError`.
-pub async fn put(client: &Client, bucket_name: String, key: String, file_path: String) -> Result<PutObjectOutput, SdkError<PutObjectError>> {
+pub async fn put(aws_args: AwsArgs, client: &Client, key: String, file_path: String) -> Result<PutObjectOutput, SdkError<PutObjectError>> {
 
     let body = ByteStream::from_path(Path::new(&file_path)).await;
     client
         .put_object()
-        .bucket(bucket_name)
+        .bucket(aws_args.bucket_name)
         .key(key)
         .body(body.unwrap())
         .send()
@@ -129,11 +148,11 @@ pub async fn put(client: &Client, bucket_name: String, key: String, file_path: S
 /// 
 /// The `delete` function is returning a `Result` type with the success case being
 /// `DeleteObjectOutput` and the error case being `SdkError<DeleteObjectError>`.
-pub async fn delete(client: &Client, bucket: String, key: String) -> Result<DeleteObjectOutput, SdkError<DeleteObjectError>> {
+pub async fn delete(aws_args: AwsArgs, client: &Client, key: String) -> Result<DeleteObjectOutput, SdkError<DeleteObjectError>> {
 
     client
         .delete_object()
-        .bucket(bucket)
+        .bucket(aws_args.bucket_name)
         .key(key)
         .send()
         .await
@@ -160,15 +179,15 @@ pub async fn delete(client: &Client, bucket: String, key: String) -> Result<Dele
 /// The `restore` function returns a `Result` containing either a
 /// `RestoreObjectOutput` on success or an `SdkError` on failure, which includes a
 /// `RestoreObjectError` and a `Response`.
-pub async fn restore(client: &Client, bucket: String, key: String) -> Result<RestoreObjectOutput, SdkError<RestoreObjectError, Response>> {
+pub async fn restore(aws_args: AwsArgs, client: &Client, key: String) -> Result<RestoreObjectOutput, SdkError<RestoreObjectError, Response>> {
     client.restore_object()
-        .bucket(bucket)
+        .bucket(aws_args.bucket_name)
         .key(key)
         .send()
         .await
 }
 
-pub async fn get_object<'a>(client: &Client, bucket: String, key: String, prefix: String, file_paths: SetIter<'a, String>) -> Result<Vec<String>, S3GetError> {
+pub async fn get_object<'a>(cli: Cli, aws_args: AwsArgs, client: &Client, key: String, prefix: String, file_paths: SetIter<'a, String>) -> Result<Vec<String>, S3GetError> {
 
     if file_paths.len() == 0 {
         return Ok(vec![]);
@@ -181,10 +200,14 @@ pub async fn get_object<'a>(client: &Client, bucket: String, key: String, prefix
     
     create_dir_all(first_dir)?;
     let mut file = File::create(first_file.clone())?;
+
+    if cli.dry_run {
+        return Ok(files);
+    }
     
     let mut object = client
         .get_object()
-        .bucket(bucket)
+        .bucket(aws_args.bucket_name)
         .key(key)
         .send()
         .await?;
@@ -265,13 +288,13 @@ pub async fn list_objects(client: &Client, bucket: &str) -> Result<(), AwsSmithy
 /// SystemTime>` on success or a `SdkError<ListObjectsV2Error>` on failure. The
 /// `HashMap` contains file keys as strings and their corresponding `SystemTime`
 /// values representing the last modified time of each file in the specified bucket.
-pub async fn list(client: &Client, bucket: String) -> Result<HashMap<String, SystemTime>, SdkError<ListObjectsV2Error>> {
+pub async fn list(client: &Client, aws_args: AwsArgs) -> Result<HashMap<String, SystemTime>, SdkError<ListObjectsV2Error>> {
 
     let mut output = HashMap::new();
 
     let _ = client
         .list_objects_v2()
-        .bucket(bucket.to_owned())
+        .bucket(aws_args.bucket_name)
         .into_paginator()
         .send()
         .collect::<Result<Vec<ListObjectsV2Output>, SdkError<ListObjectsV2Error>>>()
@@ -294,3 +317,29 @@ pub async fn list(client: &Client, bucket: String) -> Result<HashMap<String, Sys
     Ok(output)
 }
 
+pub async fn permanently_delete_all(client: &Client, aws_args: AwsArgs) -> Result<(), S3DeleteError> {
+    let versions = client.list_object_versions()
+        .bucket(aws_args.bucket_name.clone())
+        .send().await?;
+
+    let delete_objects: Vec<ObjectIdentifier> = versions.versions().iter().flat_map(|version| {
+        ObjectIdentifier::builder()
+            .set_key(version.key.clone())
+            .set_version_id(version.version_id.clone())
+            .build()
+    }).collect();
+
+    if delete_objects.is_empty() {
+        info!("No objects found to delete.");
+        return Ok(());
+    }
+
+    client
+        .delete_objects()
+        .bucket(aws_args.bucket_name.clone())
+        .delete(Delete::builder().set_objects(Some(delete_objects)).build()?)
+        .send()
+        .await?;
+
+    Ok(())
+}
