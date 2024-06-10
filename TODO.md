@@ -1,7 +1,6 @@
 # TODO
 
 ## Road map
-- Use regex to filter out files from being backed up
 - Encryption
 - Environment variables
     - AWS credentials

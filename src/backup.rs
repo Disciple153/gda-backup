@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use log::{debug, error};
+use log::{debug, error, info};
 use walkdir::WalkDir;
 
 use crate::dynamodb::HashTracker;
@@ -26,6 +26,7 @@ use crate::{
 };
 
 use checksums::hash_file;
+use regex::Regex;
 
 // Use BLAKE2B if running on 64 bit CPU
 #[cfg(target_pointer_width = "64")]
@@ -108,8 +109,25 @@ pub fn load(args: BackupArgs, conn: &mut PgConnection) {
         let Ok(metadata) = file.metadata() else {continue };
 
         if metadata.is_file() {
+
+            let file_path = file.path().display().to_string();
+            
+            let mut filtered = false;
+            let mut i = 0;
+    
+            while !filtered && i < args.filter.len() {
+                filtered = Regex::new(&args.filter[i]).unwrap()
+                    .is_match(&file_path);
+                i += 1;
+            }
+
+            if filtered {
+                info!("File filtered out of tracked files: {file_path}");
+                continue;
+            }
+    
             let result = LocalFile {
-                file_path: file.path().display().to_string(),
+                file_path,
                 modified: metadata.modified().expect("Error: OS does not support modified time metadata.")
             }.insert(conn);
 

@@ -38,6 +38,8 @@ pub struct BackupArgs {
 
     #[arg(short = 'm', long, default_value_t = 180)]
     pub min_storage_duration: i64,
+    #[arg(short = 'f', long)]
+    pub filter: Vec<String>,
 
     #[arg(short = 'b', long)]
     bucket_name: String,

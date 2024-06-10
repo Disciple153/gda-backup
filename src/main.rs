@@ -48,10 +48,13 @@ async fn main() -> Result<(), Error> {
     // EXECUTE COMMAND
     match cli.clone().command {
         Commands::Backup(ref mut args) => {
-            // FIX ARGUMENTS
-            args.target_dir = fix_target_dir(args.clone().target_dir)?;
 
-            dbg!(args.clone().target_dir);
+            // FIX ARGUMENTS
+            args.target_dir = fix_target_dir(args.target_dir.clone())?;
+
+            for filter in args.filter.clone() {
+                dbg!(filter);
+            };
             
             // Connect to local database
             let conn: &mut PgConnection = &mut establish_connection(args.clone().into());

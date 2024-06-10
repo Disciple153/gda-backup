@@ -8,7 +8,7 @@ pub const TEST_DIR_RESTORE: &str = "./test_dir/restore/";
 
 pub fn setup() {
 
-    fs::remove_dir_all(TEST_DIR).unwrap();
+    let _ = fs::remove_dir_all(TEST_DIR);
 
     let mut clear_local_db = Command::cargo_bin("gda_backup").unwrap();
     let assert = clear_local_db
@@ -42,7 +42,7 @@ pub fn create_file(file_name: &str, contents: &str) {
     file.write(contents.as_bytes()).unwrap();
 }
 
-pub fn read_file(file_name: &str) -> Result<String, Error> {
+pub fn build_restore_path(file_name: &str) -> String {
     let pwd = get_pwd().unwrap();
 
     let restore_dir = match TEST_DIR_RESTORE.strip_suffix("/") {
@@ -55,7 +55,9 @@ pub fn read_file(file_name: &str) -> Result<String, Error> {
         None => TEST_DIR_BACKUP.to_owned()
     };
 
-    let restore_dir = restore_dir + &pwd + &backup_dir;
+    restore_dir + &pwd + &backup_dir + file_name
+}
 
-    fs::read_to_string(restore_dir + file_name)
+pub fn read_file(file_name: &str) -> Result<String, Error> {
+    fs::read_to_string(build_restore_path(file_name))
 }
