@@ -7,10 +7,10 @@ pub const TEST_DIR_BACKUP: &str = "./test_dir/backup/";
 pub const TEST_DIR_RESTORE: &str = "./test_dir/restore/";
 
 pub const DB_ENGINE: &str = "postgres";
-pub const DB_USER: &str = "postgres";
-pub const DB_PASSWORD: &str = "password";
-pub const DB_HOST: &str = "localhost";
-pub const DB_NAME: &str = "postgres";
+pub const POSTGRES_USER: &str = "postgres";
+pub const POSTGRES_PASSWORD: &str = "password";
+pub const POSTGRES_HOST: &str = "localhost";
+pub const POSTGRES_DB: &str = "postgres";
 
 pub fn setup() {
 
@@ -20,10 +20,10 @@ pub fn setup() {
     let assert = clear_local_db
         .arg("clear-database")
         .args(&["--db-engine", DB_ENGINE])
-        .args(&["--db-user", DB_USER])
-        .args(&["--db-password", DB_PASSWORD])
-        .args(&["--db-host", DB_HOST])
-        .args(&["--db-name", DB_NAME])
+        .args(&["--postgres-user", POSTGRES_USER])
+        .args(&["--postgres-password", POSTGRES_PASSWORD])
+        .args(&["--postgres-host", POSTGRES_HOST])
+        .args(&["--postgres-db", POSTGRES_DB])
         .assert();
 
     assert.success();

@@ -10,33 +10,33 @@ use aws_sdk_dynamodb::Client as DynamoDbClient;
 use aws_sdk_s3::Client as S3Client;
 use diesel::prelude::PgConnection;
 
-/// The function `db_from_s3` asynchronously retrieves objects from S3 and DynamoDB,
+/// The function `postgres_from_s3` asynchronously retrieves objects from S3 and DynamoDB,
 /// and inserts files into a local database.
 /// 
 /// Arguments:
 /// 
-/// * `args`: The `args` parameter in the `db_from_s3` function represents the
+/// * `args`: The `args` parameter in the `postgres_from_s3` function represents the
 /// arguments needed for the function to operate. These arguments could include
 /// configuration settings, file paths, bucket names, table names, and other
 /// parameters required for interacting with Amazon S3, DynamoDB, and the local
 /// database. The
-/// * `conn`: The `conn` parameter in the function `db_from_s3` is a mutable
+/// * `conn`: The `conn` parameter in the function `postgres_from_s3` is a mutable
 /// reference to a `PgConnection`, which is likely a connection to a PostgreSQL
 /// database. This connection is used to interact with the local database where
 /// files are being inserted.
-/// * `s3_client`: The `s3_client` parameter in your function `db_from_s3` is a
+/// * `s3_client`: The `s3_client` parameter in your function `postgres_from_s3` is a
 /// reference to an S3 client object that is used to interact with Amazon S3
 /// service. This client is likely responsible for performing operations such as
 /// listing objects in an S3 bucket.
-/// * `dynamo_client`: The `dynamo_client` parameter in the function `db_from_s3` is
+/// * `dynamo_client`: The `dynamo_client` parameter in the function `postgres_from_s3` is
 /// of type `&DynamoDbClient`, which is likely a client for interacting with
 /// DynamoDB, a NoSQL database service provided by AWS. This client would be used to
 /// perform operations such as querying, inserting,
 /// 
 /// Returns:
 /// 
-/// The function `db_from_s3` returns an `Option<()>`.
-pub async fn db_from_aws(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoDbClient) -> Option<()> {
+/// The function `postgres_from_s3` returns an `Option<()>`.
+pub async fn postgres_from_aws(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoDbClient) -> Option<()> {
     
     if cli.dry_run {
         return Some(())

@@ -2,8 +2,7 @@
 
 ## Road map
 - Encryption
-- Environment variables
-    - AWS credentials
+- Add ntfy support
 - Docker
     - image
     - compose file

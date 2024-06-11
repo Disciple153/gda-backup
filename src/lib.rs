@@ -45,14 +45,14 @@ pub fn establish_connection(args: DatabaseArgs) -> PgConnection {
     dotenv().ok();
 
     let db_engine = args.db_engine.clone();
-    let db_user = args.db_user.clone();
-    let db_password = args.db_password.clone();
-    let db_host = args.db_host.clone();
-    let db_name = args.db_name.clone();
+    let postgres_user = args.postgres_user.clone();
+    let postgres_password = args.postgres_password.clone();
+    let postgres_host = args.postgres_host.clone();
+    let postgres_db = args.postgres_db.clone();
 
-    let db_url: String = format!("{db_engine}://{db_user}:{db_password}@{db_host}/{db_name}");
-    PgConnection::establish(&db_url)
-        .unwrap_or_else(|_| panic!("Error connecting to {}", db_url))
+    let postgres_url: String = format!("{db_engine}://{postgres_user}:{postgres_password}@{postgres_host}/{postgres_db}");
+    PgConnection::establish(&postgres_url)
+        .unwrap_or_else(|_| panic!("Error connecting to {}", postgres_url))
 }
 
 /// The function checks if the glacier_state table is empty in a Rust application.

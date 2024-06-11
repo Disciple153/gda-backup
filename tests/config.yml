@@ -9,7 +9,7 @@ filter:
   - ".txt$"
 min_storage_duration: 1
 db_engine: postgres
-db_user: postgres
-db_password: password
-db_host: localhost
-db_name: postgres
+postgres_user: postgres
+postgres_password: password
+postgres_host: localhost
+postgres_db: postgres

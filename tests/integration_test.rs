@@ -34,10 +34,10 @@ fn backup_test() {
         .args(&["--bucket-name", "disciple153-test"])
         .args(&["--dynamo-table", "gda-backup-test"])
         .args(&["--db-engine", common::DB_ENGINE])
-        .args(&["--db-user", common::DB_USER])
-        .args(&["--db-password", common::DB_PASSWORD])
-        .args(&["--db-host", common::DB_HOST])
-        .args(&["--db-name", common::DB_NAME])
+        .args(&["--postgres-user", common::POSTGRES_USER])
+        .args(&["--postgres-password", common::POSTGRES_PASSWORD])
+        .args(&["--postgres-host", common::POSTGRES_HOST])
+        .args(&["--postgres-db", common::POSTGRES_DB])
         .args(&["--min-storage-duration", "1"]);
 
     let mut restore = Command::cargo_bin("gda_backup").unwrap();
@@ -92,10 +92,10 @@ fn regex_test() {
         .args(&["--bucket-name", "disciple153-test"])
         .args(&["--dynamo-table", "gda-backup-test"])
         .args(&["--db-engine", common::DB_ENGINE])
-        .args(&["--db-user", common::DB_USER])
-        .args(&["--db-password", common::DB_PASSWORD])
-        .args(&["--db-host", common::DB_HOST])
-        .args(&["--db-name", common::DB_NAME])
+        .args(&["--postgres-user", common::POSTGRES_USER])
+        .args(&["--postgres-password", common::POSTGRES_PASSWORD])
+        .args(&["--postgres-host", common::POSTGRES_HOST])
+        .args(&["--postgres-db", common::POSTGRES_DB])
         .args(&["--min-storage-duration", "1"])
         .args(&["--filter", r".txt$"]);
 

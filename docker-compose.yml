@@ -2,7 +2,7 @@ services:
   gda_backup:
     image: disciple153/gda-backup:0.0.1
     environment:
-      CRON: "0 * * * *"
+      BACKUP_CRON: "* * * * *"
     env_file:
       - .env
     configs:
@@ -13,8 +13,9 @@ services:
       - database
     volumes:
       - ./backup_test:/backup:ro
+      - ./restore_test:/restore
 
-  database:
+  database: # If the name of the database is changed, the POSTGRES_HOST environment variable must be set to its name
     image: 'postgres:latest'
     env_file:
       - .env

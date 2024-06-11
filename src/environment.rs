@@ -13,10 +13,10 @@ const FILTER: &str = "FILTER";
 const BUCKET_NAME: &str = "BUCKET_NAME";
 const DYNAMO_TABLE: &str = "DYNAMO_TABLE";
 const DB_ENGINE: &str = "DB_ENGINE";
-const DB_USER: &str = "DB_USER";
-const DB_PASSWORD: &str = "DB_PASSWORD";
-const DB_HOST: &str = "DB_HOST";
-const DB_NAME: &str = "DB_NAME";
+const POSTGRES_USER: &str = "POSTGRES_USER";
+const POSTGRES_PASSWORD: &str = "POSTGRES_PASSWORD";
+const POSTGRES_HOST: &str = "POSTGRES_HOST";
+const POSTGRES_DB: &str = "POSTGRES_DB";
 
 #[derive(Debug, Parser, Clone)]
 #[command(version, about, long_about = None)]
@@ -80,13 +80,13 @@ pub struct BackupArgs {
     #[arg(short = 'e', long)]
     db_engine: String,
     #[arg(short = 'u', long)]
-    db_user: String,
+    postgres_user: String,
     #[arg(short = 'p', long)]
-    db_password: String,
+    postgres_password: String,
     #[arg(short = 'a', long)]
-    db_host: String,
+    postgres_host: String,
     #[arg(short = 'n', long)]
-    db_name: String,
+    postgres_db: String,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -111,13 +111,13 @@ pub struct ClearDatabaseArgs {
     #[arg(short = 'e', long)]
     db_engine: String,
     #[arg(short = 'u', long)]
-    db_user: String,
+    postgres_user: String,
     #[arg(short = 'p', long)]
-    db_password: String,
+    postgres_password: String,
     #[arg(short = 'a', long)]
-    db_host: String,
+    postgres_host: String,
     #[arg(short = 'n', long)]
-    db_name: String,
+    postgres_db: String,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -140,10 +140,10 @@ pub struct BackupWithEnvYaml {
     bucket_name: Option<String>,
     dynamo_table: Option<String>,
     db_engine: Option<String>,
-    db_user: Option<String>,
-    db_password: Option<String>,
-    db_host: Option<String>,
-    db_name: Option<String>,
+    postgres_user: Option<String>,
+    postgres_password: Option<String>,
+    postgres_host: Option<String>,
+    postgres_db: Option<String>,
 }
 
 // STRUCT CONSTRUCTORS
@@ -156,10 +156,10 @@ impl BackupWithEnvYaml {
             bucket_name: None,
             dynamo_table: None,
             db_engine: None,
-            db_user: None,
-            db_password: None,
-            db_host: None,
-            db_name: None,
+            postgres_user: None,
+            postgres_password: None,
+            postgres_host: None,
+            postgres_db: None,
             dry_run: None,
             log_level: None,
         }
@@ -181,10 +181,7 @@ impl From<BackupWithEnvArgs> for BackupWithEnvYaml {
 
         let yaml = match serde_yml::from_reader(config_file) {
             Ok(value) => value,
-            Err(error) => {
-                dbg!(error);
-                return BackupWithEnvYaml::empty();
-            },
+            Err(_) => return BackupWithEnvYaml::empty()
         };
 
         yaml
@@ -194,16 +191,14 @@ impl From<BackupWithEnvArgs> for BackupWithEnvYaml {
 impl From<BackupWithEnvYaml> for BackupArgs {
     fn from(yaml: BackupWithEnvYaml) -> Self {
 
-        dbg!(yaml.clone());
-
         let target_dir = get_var(yaml.target_dir, TARGET_DIR);
         let bucket_name = get_var(yaml.bucket_name, BUCKET_NAME);
         let dynamo_table = get_var(yaml.dynamo_table, DYNAMO_TABLE);
         let db_engine = get_var(yaml.db_engine, DB_ENGINE);
-        let db_user = get_var(yaml.db_user, DB_USER);
-        let db_password = get_var(yaml.db_password, DB_PASSWORD);
-        let db_host = get_var(yaml.db_host, DB_HOST);
-        let db_name = get_var(yaml.db_name, DB_NAME);
+        let postgres_user = get_var(yaml.postgres_user, POSTGRES_USER);
+        let postgres_password = get_var(yaml.postgres_password, POSTGRES_PASSWORD);
+        let postgres_host = get_var(yaml.postgres_host, POSTGRES_HOST);
+        let postgres_db = get_var(yaml.postgres_db, POSTGRES_DB);
 
         let min_storage_duration = match yaml.min_storage_duration {
             Some(value) => value,
@@ -231,10 +226,10 @@ impl From<BackupWithEnvYaml> for BackupArgs {
             bucket_name,
             dynamo_table,
             db_engine,
-            db_user,
-            db_password,
-            db_host,
-            db_name,
+            postgres_user,
+            postgres_password,
+            postgres_host,
+            postgres_db,
         }
     }
 }
@@ -277,20 +272,20 @@ fn get_var_bool(yaml_value: Option<bool>, env_key: &str) -> bool {
 #[derive(Debug, Clone)]
 pub struct DatabaseArgs {
     pub db_engine: String,
-    pub db_user: String,
-    pub db_password: String,
-    pub db_host: String,
-    pub db_name: String,
+    pub postgres_user: String,
+    pub postgres_password: String,
+    pub postgres_host: String,
+    pub postgres_db: String,
 }
 
 impl From<BackupArgs> for DatabaseArgs {
     fn from(value: BackupArgs) -> Self {
         DatabaseArgs {
             db_engine: value.db_engine,
-            db_user: value.db_user,
-            db_password: value.db_password,
-            db_host: value.db_host,
-            db_name: value.db_name,
+            postgres_user: value.postgres_user,
+            postgres_password: value.postgres_password,
+            postgres_host: value.postgres_host,
+            postgres_db: value.postgres_db,
         }
     }
 }
@@ -299,10 +294,10 @@ impl From<ClearDatabaseArgs> for DatabaseArgs {
     fn from(value: ClearDatabaseArgs) -> Self {
         DatabaseArgs {
             db_engine: value.db_engine,
-            db_user: value.db_user,
-            db_password: value.db_password,
-            db_host: value.db_host,
-            db_name: value.db_name,
+            postgres_user: value.postgres_user,
+            postgres_password: value.postgres_password,
+            postgres_host: value.postgres_host,
+            postgres_db: value.postgres_db,
         }
     }
 }

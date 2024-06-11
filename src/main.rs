@@ -28,8 +28,6 @@ async fn main() -> Result<(), Error> {
     // ARGUMENTS
     let cli = Cli::parse();
 
-    dbg!(cli.clone());
-
     let cli = match cli.command {
         Commands::BackupWithEnv(args) => {
             let yaml: BackupWithEnvYaml = args.into();
@@ -38,19 +36,14 @@ async fn main() -> Result<(), Error> {
         _ => cli
     };
 
-    dbg!(cli.clone());
-
     // SET LOG LEVEL
     if cli.quiet {
-        dbg!("Quiet");
         Builder::new().filter_level(LevelFilter::Error).init();
     }
     else if cli.debug {
-        dbg!("Debug");
         Builder::new().filter_level(LevelFilter::Debug).init();
     }
     else {
-        dbg!("Info");
         Builder::new().filter_level(LevelFilter::Info).init();
     }
     
@@ -85,7 +78,6 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-
 fn fix_target_dir(target_dir: String) -> Result<String, Error> {
 
     let target_dir = match target_dir.strip_suffix("/") {
@@ -104,9 +96,8 @@ fn fix_target_dir(target_dir: String) -> Result<String, Error> {
 
 async fn backup(cli: Cli, mut args: BackupArgs, s3_client: &mut S3Client, dynamo_client: &mut DynamoClient) -> Result<(), Error> {
     // FIX ARGUMENTS
-    dbg!("here");
     args.target_dir = fix_target_dir(args.target_dir.clone())?;
-    dbg!(args.target_dir.clone());
+
     // Connect to local database
     let conn: &mut PgConnection = &mut establish_connection(args.clone().into());
     
@@ -119,7 +110,7 @@ async fn backup(cli: Cli, mut args: BackupArgs, s3_client: &mut S3Client, dynamo
     // If glacier_state is empty, populate it from Glacier.
     if glacier_state_is_empty(conn) {
         info!("Glacier state empty. Loading state from DynamoDB and S3...");
-        let _ = restore::db_from_aws(cli.clone(), args.clone(), conn, &s3_client, &dynamo_client).await;
+        let _ = restore::postgres_from_aws(cli.clone(), args.clone(), conn, &s3_client, &dynamo_client).await;
     }
 
     // UPLOAD CHANGES
