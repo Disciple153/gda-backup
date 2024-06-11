@@ -165,6 +165,8 @@ pub fn load(args: BackupArgs, conn: &mut PgConnection) {
 /// and retrieving
 pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_client: &S3Client, dynamo_client: &DynamoClient) -> (usize, usize) {
 
+    info!("Preparing to back up: Scanning all files...");
+
     // Keeps track of files that still exist locally
     let mut existing_g_files: HashSet<String> = HashSet::new();
 
@@ -215,6 +217,8 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
         
     .collect();
 
+    info!("Preparing to back up: Determining which files need to be backed up...");
+
     // Get HashTrackers for all changes and update them to reflect the current state
     let mut hash_tracker_changes: HashMap<String, HashTrackerChange> = HashMap::new();
     for file_change in file_changes {
@@ -239,8 +243,21 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
     let mut failures = 0;
 
     if cli.dry_run {
+        info!("Preparation complete. Dry run output:");
+        for (_, hash_tracker_change) in hash_tracker_changes {
+            for file in hash_tracker_change.created_files {
+                info!("Backup: {}", file.file_path);
+            };
+
+            for file in hash_tracker_change.deleted_files {
+                info!("Delete: {}", file.file_path);
+            };
+        };
+
         return (num_changes - failures, failures);
     }
+
+    info!("Preparation complete. Backing up...");
 
     // Make all updates in the order S3 -> DynamoDB -> PostgreSQL, and continue on any failure
     for (hash, mut hash_tracker_change) in hash_tracker_changes {
@@ -321,7 +338,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
             if !deleted_g_files.contains(&d_file.file_path) && !existing_g_files.contains(&d_file.file_path) {
                 debug!("Deleting file entry: {} from local database.", d_file.file_path.clone());
                 match d_file.delete(conn) {
-                    Ok(_) => (),
+                    Ok(_) => info!("Deleted: {}", d_file.file_path),
                     Err(error) => {
                         error!("Failed to remove file from local database: {:?}\n Error: {}", d_file, error);
                         failures += 1;
@@ -336,7 +353,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
             if !saved_g_files.contains(&c_file.file_path) {
                 debug!("Inserting file entry: {} to local database.", c_file.file_path.clone());
                 match c_file.insert(conn) {
-                    Ok(_) => (),
+                    Ok(_) => info!("Uploaded: {}", c_file.file_path),
                     Err(error) => {
                         error!("Failed to insert/update file into local database: {:?}\n Error: {}", c_file, error);
                         failures += 1;

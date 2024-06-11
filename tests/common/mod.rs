@@ -6,6 +6,12 @@ pub const TEST_DIR: &str = "./test_dir/";
 pub const TEST_DIR_BACKUP: &str = "./test_dir/backup/";
 pub const TEST_DIR_RESTORE: &str = "./test_dir/restore/";
 
+pub const DB_ENGINE: &str = "postgres";
+pub const DB_USER: &str = "postgres";
+pub const DB_PASSWORD: &str = "password";
+pub const DB_HOST: &str = "localhost";
+pub const DB_NAME: &str = "postgres";
+
 pub fn setup() {
 
     let _ = fs::remove_dir_all(TEST_DIR);
@@ -13,11 +19,11 @@ pub fn setup() {
     let mut clear_local_db = Command::cargo_bin("gda_backup").unwrap();
     let assert = clear_local_db
         .arg("clear-database")
-        .args(&["--db-engine", "postgres"])
-        .args(&["--db-user", "username"])
-        .args(&["--db-password", "password"])
-        .args(&["--db-host", "localhost"])
-        .args(&["--db-name", "backup_state"])
+        .args(&["--db-engine", DB_ENGINE])
+        .args(&["--db-user", DB_USER])
+        .args(&["--db-password", DB_PASSWORD])
+        .args(&["--db-host", DB_HOST])
+        .args(&["--db-name", DB_NAME])
         .assert();
 
     assert.success();

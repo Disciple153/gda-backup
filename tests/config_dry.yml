@@ -1,0 +1,15 @@
+dry_run: true
+debug: true
+quiet: false
+log_level: debug
+target_dir: ./test_dir/backup
+bucket_name: disciple153-test
+dynamo_table: gda-backup-test
+filter:
+  - ".txt$"
+min_storage_duration: 1
+db_engine: postgres
+db_user: postgres
+db_password: password
+db_host: localhost
+db_name: postgres
