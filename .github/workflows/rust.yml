@@ -47,3 +47,6 @@ jobs:
       run: diesel migration run --database-url postgres://postgres:${{ secrets.POSTGRES_PASSWORD }}@localhost/postgres
     - name: Run tests
       run: cargo test --verbose
+    - name: List dir
+      if: always()
+      run: find ./ -type d 
