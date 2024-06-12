@@ -49,4 +49,4 @@ jobs:
       run: cargo test --verbose
     - name: List dir
       if: always()
-      run: find /temp/gda_backup_test -type d 
+      run: find ./test_dir -type d 
