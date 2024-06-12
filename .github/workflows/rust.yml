@@ -21,22 +21,23 @@ jobs:
         image: postgres
         # Provide the password for postgres
         env:
-          POSTGRES_PASSWORD: password
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
         ports:
           # Maps tcp port 5432 on service container to the host
           - 5432:5432
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE }}
+        aws-region: ${{ vars.AWS_REGION }}
+        role-session-name: GitHub-OIDC-gda-backup
     - name: Build
       run: cargo build --verbose
     - name: Install diesel
       run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/diesel-rs/diesel/releases/download/v2.2.0/diesel_cli-installer.sh | sh
-    # - name: Start database
-    #   uses: hoverkraft-tech/compose-action@v2.0.0
-    #   with:
-    #     compose-file: ./tests/docker-compose.yml
     - name: Initialize database
-      run: diesel migration run --database-url postgres://postgres:password@localhost/postgres
+      run: diesel migration run --database-url postgres://postgres:${{ secrets.POSTGRES_PASSWORD }}@localhost/postgres
     - name: Run tests
       run: cargo test --verbose
