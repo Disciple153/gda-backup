@@ -3,6 +3,8 @@ services:
     image: disciple153/gda-backup:0.0.1
     environment:
       BACKUP_CRON: "* * * * *"
+      FILTER: "\\.md$DEL\\.txt$"
+      FILTER_DELIMITER: "DEL"
     env_file:
       - .env
     configs:
