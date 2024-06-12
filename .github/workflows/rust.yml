@@ -50,3 +50,7 @@ jobs:
     - name: List dir
       if: always()
       run: find ./test_dir -type d 
+    - uses: ncipollo/release-action@v1
+      with:
+        artifacts: "./target/release/gda_backup,diesel.toml,migrations"
+        body: "Test release"

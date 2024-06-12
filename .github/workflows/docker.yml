@@ -69,7 +69,7 @@ jobs:
 
       - name: Test docker image
         run: |
-
+          mkdir -p ./backup_test
           touch ./backup_test/test.txt
           touch ./backup_test/test.md
           docker build -t disciple153/gda-backup:0.0.1 .
