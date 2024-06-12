@@ -2,9 +2,9 @@ use assert_cmd::Command;
 use std::{env, fs};
 use std::io::{Error, Write};
 
-pub const TEST_DIR: &str = "./test_dir/";
-pub const TEST_DIR_BACKUP: &str = "./test_dir/backup/";
-pub const TEST_DIR_RESTORE: &str = "./test_dir/restore/";
+pub const TEST_DIR: &str = "/temp/gda_backup_test/";
+pub const TEST_DIR_BACKUP: &str = "/temp/gda_backup_test/backup/";
+pub const TEST_DIR_RESTORE: &str = "/temp/gda_backup_test/restore/";
 
 pub const DB_ENGINE: &str = "postgres";
 pub const POSTGRES_USER: &str = "postgres";
