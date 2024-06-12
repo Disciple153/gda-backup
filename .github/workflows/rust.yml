@@ -46,10 +46,10 @@ jobs:
       run: diesel migration run --database-url postgres://postgres:${{ secrets.POSTGRES_PASSWORD }}@localhost/postgres
     - name: Run tests
       run: cargo test --verbose
-    - name: List files
-      run: find ./ -type d 
     - name: Build
       run: cargo build --release
+    - name: List files
+      run: ls . -R
     - name: Prepare release
       run: |
         mkdir -p ./release
@@ -57,7 +57,7 @@ jobs:
         cp ./diesel.toml ./release/diesel.toml
         cp -r ./migrations ./release/migrations
     - name: List files
-      run: find ./ -type d 
+      run: ls migrations/ -R
     - uses: montudor/action-zip@v1
       with:
         args: zip -qq -r dir.zip dir
