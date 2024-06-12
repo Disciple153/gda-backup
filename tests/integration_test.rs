@@ -49,10 +49,12 @@ fn backup_test() {
         .args(&["--dynamo-table", "gda-backup-test"]);
 
     let assert_backup = backup.assert();
+    dbg!(assert_backup.get_output());
 
     assert_backup.success();
     
     let assert_restore = restore.assert();
+    dbg!(assert_restore.get_output());
 
     assert_restore.success();
 
@@ -112,10 +114,12 @@ fn regex_test() {
         .args(&["--dynamo-table", "gda-backup-test"]);
 
     let assert_backup = backup.assert();
+    dbg!(assert_backup.get_output());
 
     assert_backup.success();
     
     let assert_restore = restore.assert();
+    dbg!(assert_restore.get_output());
 
     assert_restore.success();
 
@@ -159,10 +163,12 @@ fn config_file_test() {
         .args(&["--dynamo-table", "gda-backup-test"]);
 
     let assert_backup = backup.assert();
+    dbg!(assert_backup.get_output());
 
     assert_backup.success();
     
     let assert_restore = restore.assert();
+    dbg!(assert_restore.get_output());
 
     assert_restore.success();
     
@@ -206,10 +212,12 @@ fn config_file_test_dry() {
         .args(&["--dynamo-table", "gda-backup-test"]);
 
     let assert_backup = backup.assert();
+    dbg!(assert_backup.get_output());
 
     assert_backup.success();
     
     let assert_restore = restore.assert();
+    dbg!(assert_restore.get_output());
 
     assert_restore.success();
 
