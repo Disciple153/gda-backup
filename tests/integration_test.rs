@@ -56,6 +56,10 @@ fn backup_test() {
 
     assert_restore.success();
 
+    dbg!(common::build_restore_path(backup_test_file_1));
+    dbg!(common::build_restore_path(backup_test_file_2));
+    dbg!(common::build_restore_path(backup_test_file_3));
+
     let restore_test1 = common::read_file(backup_test_file_1).unwrap();
     let restore_test2 = common::read_file(backup_test_file_2).unwrap();
     let restore_test3 = common::read_file(backup_test_file_3).unwrap();
@@ -115,6 +119,9 @@ fn regex_test() {
 
     assert_restore.success();
 
+    dbg!(common::build_restore_path(backup_test_file_1));
+    dbg!(common::build_restore_path(backup_test_file_2));
+
     assert!(!Path::new(&common::build_restore_path(backup_test_file_1)).exists());
     assert!(Path::new(&common::build_restore_path(backup_test_file_2)).exists());
 }
@@ -158,6 +165,9 @@ fn config_file_test() {
     let assert_restore = restore.assert();
 
     assert_restore.success();
+    
+    dbg!(common::build_restore_path(backup_test_file_1));
+    dbg!(common::build_restore_path(backup_test_file_2));
 
     assert!(!Path::new(&common::build_restore_path(backup_test_file_1)).exists());
     assert!(Path::new(&common::build_restore_path(backup_test_file_2)).exists());
@@ -202,6 +212,9 @@ fn config_file_test_dry() {
     let assert_restore = restore.assert();
 
     assert_restore.success();
+
+    dbg!(common::build_restore_path(backup_test_file_1));
+    dbg!(common::build_restore_path(backup_test_file_2));
 
     assert!(!Path::new(&common::build_restore_path(backup_test_file_1)).exists());
     assert!(!Path::new(&common::build_restore_path(backup_test_file_2)).exists());
