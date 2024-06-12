@@ -57,15 +57,15 @@ jobs:
         cp ./diesel.toml ./release/diesel.toml
         cp -r ./migrations ./release/migrations
     - name: List files
-      run: ls migrations/ -R
+      run: ls release -R
     - uses: montudor/action-zip@v1
       with:
-        args: zip -qq -r dir.zip dir
+        args: zip -qq -r gda_backup.zip release
     - name: Deploy release
       uses: ncipollo/release-action@v1
       #if: ${{ github.event_name != 'pull_request' }}
       with:
-        artifacts: "target/release/gda_backup,diesel.toml,migrations/*"
+        artifacts: gda_backup.zip
         body: "Test release"
         name: test
         tag: 0.0.1
