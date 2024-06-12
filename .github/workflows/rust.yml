@@ -54,3 +54,4 @@ jobs:
       with:
         artifacts: "./target/release/gda_backup,diesel.toml,migrations"
         body: "Test release"
+        name: test
