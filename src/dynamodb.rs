@@ -2,8 +2,7 @@ use std::collections::hash_set::Iter as SetIter;
 use std::collections::{HashMap, HashSet};
 
 use chrono::{
-    DateTime,
-    Utc,
+    DateTime, Utc
 };
 
 use crate::aws;
@@ -182,7 +181,11 @@ impl HashTracker {
             .send().await.ok()?.item?;
 
         let file_names = result.get(FILE_NAMES_KEY)?.as_ss().ok()?;
-        let expiration = result.get(EXPIRATION_KEY)?.as_s().ok()?.parse().ok()?;
+
+    
+        // Create a normal DateTime from the NaiveDateTime
+        let seconds = result.get(EXPIRATION_KEY)?.as_n().ok()?.parse().ok()?;
+        let expiration: DateTime<Utc> = DateTime::from_timestamp(seconds, 0)?;
 
         let mut hash_tracker = HashTracker::import (
             hash,
@@ -209,7 +212,8 @@ impl HashTracker {
             // Convert each valid item into a HashTracker
             .iter().map(|value| {
                 let hash = value.get(HASH_KEY)?.as_s().ok()?.to_owned();
-                let expiration= value.get(EXPIRATION_KEY)?.as_s().ok()?.parse().ok()?;
+                let seconds = value.get(EXPIRATION_KEY)?.as_n().ok()?.parse().ok()?;
+                let expiration: DateTime<Utc> = DateTime::from_timestamp(seconds, 0)?;
                 let file_names = value.get(FILE_NAMES_KEY)?.as_ss().ok()?.to_owned();
 
                 Some(HashTracker::import(hash, expiration, file_names))
@@ -255,7 +259,7 @@ impl HashTracker {
             .table_name(table_name)
             .item(HASH_KEY, AttributeValue::S(self.hash.clone()))
             .item(FILE_NAMES_KEY, AttributeValue::Ss(file_names))
-            .item(EXPIRATION_KEY, AttributeValue::S(self.expiration.to_string()))
+            .item(EXPIRATION_KEY, AttributeValue::N(self.expiration.timestamp().to_string()))
             .send().await?;
 
         Ok(response)

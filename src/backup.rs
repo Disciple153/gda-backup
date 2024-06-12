@@ -133,7 +133,7 @@ pub fn load(args: BackupArgs, conn: &mut PgConnection) {
 
             match result {
                 Ok(_) => (),
-                Err(error) => error!("Failed to load file into local database: {:?}\n Error: {}", file, error),
+                Err(error) => error!("Failed to load file into local database: {:?}\n Error: {:?}", file, error),
             }
         }
     }
@@ -273,7 +273,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
                     match s3::delete(args.clone().into(), s3_client, hash.clone()).await {
                         Ok(_) => (),
                         Err(error) => {
-                            error!("Failed to delete file from S3: {:?}\n Error: {}", hash_tracker_change, error);
+                            error!("Failed to delete file from S3: {:?}\n Error: {:?}", hash_tracker_change, error);
                             failures += 1;
                             continue;
                         }
@@ -297,7 +297,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
                     match s3::put(args.clone().into(), s3_client, hash.clone(), g_file.file_path.to_string()).await {
                         Ok(_) => (),
                         Err(error) => {
-                            error!("Failed to upload file to S3: {:?}\n Error: {}", hash_tracker_change, error);
+                            error!("Failed to upload file to S3: {:?}\n Error: {:?}", hash_tracker_change, error);
                             failures += 1;
                             continue;
                         }
@@ -312,7 +312,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
                     match s3::restore(args.clone().into(), s3_client, hash.clone()).await {
                         Ok(_) => (),
                         Err(error) => {
-                            error!("Failed to remove delete marker from file in S3: {:?}\n Error: {}", hash_tracker_change, error);
+                            error!("Failed to remove delete marker from file in S3: {:?}\n Error: {:?}", hash_tracker_change, error);
                             failures += 1;
                             continue;
                         }
@@ -326,7 +326,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
             match hash_tracker_change.new.update(args.clone().into(), dynamo_client).await {
                 Ok(_) => (),
                 Err(error) => {
-                    error!("Failed to upload hash tracker to DynamoDB: {:?}\n Error: {}", hash_tracker_change, error);
+                    error!("Failed to upload hash tracker to DynamoDB: {:?}\n Error: {:?}", hash_tracker_change, error);
                     failures += 1;
                     continue;
                 }
@@ -340,7 +340,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
                 match d_file.delete(conn) {
                     Ok(_) => info!("Deleted: {}", d_file.file_path),
                     Err(error) => {
-                        error!("Failed to remove file from local database: {:?}\n Error: {}", d_file, error);
+                        error!("Failed to remove file from local database: {:?}\n Error: {:?}", d_file, error);
                         failures += 1;
                         continue;
                     }
@@ -355,7 +355,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
                 match c_file.insert(conn) {
                     Ok(_) => info!("Uploaded: {}", c_file.file_path),
                     Err(error) => {
-                        error!("Failed to insert/update file into local database: {:?}\n Error: {}", c_file, error);
+                        error!("Failed to insert/update file into local database: {:?}\n Error: {:?}", c_file, error);
                         failures += 1;
                         continue;
                     }

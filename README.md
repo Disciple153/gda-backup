@@ -162,17 +162,17 @@ You can remove permissions to ensure certain actions are not possible.
 			"Sid": "S3Actions",
 			"Effect": "Allow",
 			"Action": [
-				"s3:DeleteObject"
+				"s3:DeleteObject",
 				"s3:DeleteObjectVersion",
 				"s3:GetObject",
 				"s3:ListBucket",
 				"s3:ListBucketVersions",
 				"s3:PutObject",
-				"s3:RestoreObject",
+				"s3:RestoreObject"
 			],
 			"Resource": [
-				"arn:aws:s3:::*/*",
-				"arn:aws:s3:::my-bucket",
+				"arn:aws:s3:::my-bucket/*",
+				"arn:aws:s3:::my-bucket"
 			]
 		},
         		{
@@ -182,7 +182,7 @@ You can remove permissions to ensure certain actions are not possible.
 				"dynamodb:DeleteItem",
 				"dynamodb:GetItem",
 				"dynamodb:PutItem",
-				"dynamodb:Scan",
+				"dynamodb:Scan"
 			],
 			"Resource": [
 				"arn:aws:dynamodb:us-east-1:387145356314:table/my-table",

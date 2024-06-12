@@ -49,12 +49,18 @@ fn backup_test() {
         .args(&["--dynamo-table", "gda-backup-test"]);
 
     let assert_backup = backup.assert();
+    dbg!(assert_backup.get_output());
 
     assert_backup.success();
     
     let assert_restore = restore.assert();
+    dbg!(assert_restore.get_output());
 
     assert_restore.success();
+
+    dbg!(common::build_restore_path(backup_test_file_1));
+    dbg!(common::build_restore_path(backup_test_file_2));
+    dbg!(common::build_restore_path(backup_test_file_3));
 
     let restore_test1 = common::read_file(backup_test_file_1).unwrap();
     let restore_test2 = common::read_file(backup_test_file_2).unwrap();
@@ -108,12 +114,17 @@ fn regex_test() {
         .args(&["--dynamo-table", "gda-backup-test"]);
 
     let assert_backup = backup.assert();
+    dbg!(assert_backup.get_output());
 
     assert_backup.success();
     
     let assert_restore = restore.assert();
+    dbg!(assert_restore.get_output());
 
     assert_restore.success();
+
+    dbg!(common::build_restore_path(backup_test_file_1));
+    dbg!(common::build_restore_path(backup_test_file_2));
 
     assert!(!Path::new(&common::build_restore_path(backup_test_file_1)).exists());
     assert!(Path::new(&common::build_restore_path(backup_test_file_2)).exists());
@@ -152,12 +163,17 @@ fn config_file_test() {
         .args(&["--dynamo-table", "gda-backup-test"]);
 
     let assert_backup = backup.assert();
+    dbg!(assert_backup.get_output());
 
     assert_backup.success();
     
     let assert_restore = restore.assert();
+    dbg!(assert_restore.get_output());
 
     assert_restore.success();
+    
+    dbg!(common::build_restore_path(backup_test_file_1));
+    dbg!(common::build_restore_path(backup_test_file_2));
 
     assert!(!Path::new(&common::build_restore_path(backup_test_file_1)).exists());
     assert!(Path::new(&common::build_restore_path(backup_test_file_2)).exists());
@@ -196,12 +212,17 @@ fn config_file_test_dry() {
         .args(&["--dynamo-table", "gda-backup-test"]);
 
     let assert_backup = backup.assert();
+    dbg!(assert_backup.get_output());
 
     assert_backup.success();
     
     let assert_restore = restore.assert();
+    dbg!(assert_restore.get_output());
 
     assert_restore.success();
+
+    dbg!(common::build_restore_path(backup_test_file_1));
+    dbg!(common::build_restore_path(backup_test_file_2));
 
     assert!(!Path::new(&common::build_restore_path(backup_test_file_1)).exists());
     assert!(!Path::new(&common::build_restore_path(backup_test_file_2)).exists());
