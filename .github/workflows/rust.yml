@@ -32,7 +32,8 @@ jobs:
           - 5432:5432
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -47,13 +48,24 @@ jobs:
       run: diesel migration run --database-url postgres://postgres:${{ secrets.POSTGRES_PASSWORD }}@localhost/postgres
     - name: Run tests
       run: cargo test --verbose
-    - name: List dir
-      if: always()
-      run: find ./test_dir -type d 
-    - uses: ncipollo/release-action@v1
+    - name: List files
+      run: find ./ -type d 
+    - name: Prepare release
+      run: |
+        mkdir -p ./release
+        cp ./target/release/gda_backup ./release/gda_backup
+        cp ./diesel.toml ./release/diesel.toml
+        cp -r ./migrations ./release/migrations
+    - name: List files
+      run: find ./ -type d 
+    - uses: montudor/action-zip@v1
+      with:
+        args: zip -qq -r dir.zip dir
+    - name: Deploy release
+      uses: ncipollo/release-action@v1
       #if: ${{ github.event_name != 'pull_request' }}
       with:
-        artifacts: "./target/release/gda_backup,diesel.toml,migrations"
+        artifacts: "target/release/gda_backup,diesel.toml,migrations/*"
         body: "Test release"
         name: test
         tag: 0.0.1
