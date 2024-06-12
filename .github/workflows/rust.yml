@@ -9,6 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  RELEASE_VER: 1.0.0
 
 permissions:
   id-token: write
@@ -65,9 +66,9 @@ jobs:
         zip -r9 ../gda_backup.zip *
     - name: Deploy release
       uses: ncipollo/release-action@v1
-      #if: ${{ github.event_name != 'pull_request' }}
+      if: ${{ github.event_name != 'pull_request' }}
       with:
         artifacts: gda_backup.zip
-        body: "Test release"
-        name: test
-        tag: 0.0.1
+        name: ${{ env.RELEASE_VER }}
+        body: "Initial release"
+        tag: ${{ env.RELEASE_VER }}

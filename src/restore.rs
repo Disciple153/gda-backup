@@ -65,7 +65,7 @@ pub async fn postgres_from_aws(cli: Cli, args: BackupArgs, conn: &mut PgConnecti
 
             match result {
                 Ok(_) => (),
-                Err(error) => error!("Failed to load file into local database from DynamoDB and S3: {:?}\n Error: {}", file, error),
+                Err(error) => error!("Failed to load file into local database from DynamoDB and S3: {:?}\n Error: {:?}", file, error),
             };
 
             Some(())
