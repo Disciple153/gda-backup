@@ -3,7 +3,6 @@ name: Rust
 on:
   push:
     branches: [ "main" ]
-    tags: ["v*.*.*"]
   pull_request:
     branches: [ "main" ]
 
@@ -57,3 +56,4 @@ jobs:
         artifacts: "./target/release/gda_backup,diesel.toml,migrations"
         body: "Test release"
         name: test
+        tag: 0.0.1
