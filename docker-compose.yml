@@ -1,0 +1,43 @@
+services:
+  gda_backup:
+    image: disciple153/gda-backup:0.0.1
+    environment:
+      BACKUP_CRON: "* * * * *"
+    env_file:
+      - .env
+    configs:
+      - gda_backup_config
+    networks:
+      - gda_backup_network
+    depends_on:
+      - database
+    volumes:
+      - ./backup_test:/backup:ro
+      - ./restore_test:/restore
+
+  database:
+    image: 'postgres:latest'
+    env_file:
+      - .env
+    volumes:
+      - gda_backup_volume:/var/lib/postgresql/data
+    networks:
+      - gda_backup_network
+
+volumes:
+  gda_backup_volume:
+
+networks:
+  gda_backup_network:
+
+configs:
+  gda_backup_config:
+    content: |
+      dry_run: true
+      log_level: debug
+      target_dir: /backup
+      bucket_name: my-bucket
+      dynamo_table: my-table
+      filters:
+        - ".txt$"
+      min_storage_duration: 1

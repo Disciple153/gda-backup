@@ -3,9 +3,8 @@
 diesel::table! {
     glacier_state (file_path) {
         file_path -> Text,
+        file_hash -> Nullable<Text>,
         modified -> Timestamp,
-        uploaded -> Nullable<Timestamp>,
-        pending_delete -> Bool,
     }
 }
 

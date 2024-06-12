@@ -1,26 +1,16 @@
 # TODO
 
 ## Road map
-- Document functions
-- Keep track of:
-    - failures
-    - uploads
-    - updates
-    - deletions
-- Implement dry run
-- Properly implement async
 - Encryption
-- Environment variables
-    - AWS credentials
-    - BUCKET_NAME
-    - DB_ENGINE
-    - DB_USER
-    - DB_PASSWORD
-    - DB_HOST
-    - DB_DB
+- Add ntfy support
+- Set default min_storage duration, and make infinity possible
 - Docker
     - image
     - compose file
+- Document recommended bucket settings
+- Add messages to restore and delete, warning of potential charges
 
-## Stretch
-- Use hashes instead of file names
+- Compress files to be uploaded 
+- Restore specific files
+- Document functions (for real)
+

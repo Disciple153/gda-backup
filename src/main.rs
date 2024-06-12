@@ -1,243 +1,193 @@
-use std::{io::Error, time::SystemTime};
-use aws_sdk_s3::Client as S3Client;
-use walkdir::WalkDir;
-use diesel::prelude::*;
+use std::env;
+use std::io::{self, Error};
 
-use glacier_sync::{
-    clear_local_state,
-    establish_connection,
-    get_changed_files,
-    get_missing_files,
-    get_new_files,
-    get_pending_delete_files,
-    get_pending_upsert_files,
-    glacier_state_is_empty,
-    models::*
+use aws_sdk_s3::Client as S3Client;
+use aws_sdk_dynamodb::Client as DynamoClient;
+use clap::Parser;
+use diesel::prelude::PgConnection;
+use log::{LevelFilter, error, info};
+use env_logger::Builder;
+
+use gda_backup::environment::{
+    AwsArgs, BackupArgs, BackupWithEnvYaml, CleanDynamoArgs, ClearDatabaseArgs, Cli, Commands, DeleteBackupArgs, RestoreArgs
 };
 
-mod s3;
+use gda_backup::{
+    clear_glacier_state, clear_local_state, establish_connection, glacier_state_is_empty
+};
 
-const BUCKET_NAME: &str = "disciple153-test";
+use gda_backup::backup;
+
+use gda_backup::restore;
+use gda_backup::s3;
+use gda_backup::dynamodb::{self, HashTracker};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    // let pwd: std::path::PathBuf = env::current_dir()?;
-    let pwd = "/home/disciple153/documents/homelab-tf/glacier_sync/backup_test";
 
-    // GET CONNECTIONS
-    let conn: &mut PgConnection = &mut establish_connection();
-    let s3_client = s3::get_client().await;
+    // ARGUMENTS
+    let cli = Cli::parse();
 
-    // CLEAR LOCAL STATE FROM DATABASE
-    clear_local_state(conn);
+    let cli = match cli.command {
+        Commands::BackupWithEnv(args) => {
+            let yaml: BackupWithEnvYaml = args.into();
+            yaml.clone().into()
+        },
+        _ => cli
+    };
 
-    // LOAD LOCAL STATE INTO DATABASE
-
-    for file in WalkDir::new(pwd).into_iter().filter_map(|e: Result<walkdir::DirEntry, walkdir::Error>| e.ok()) {
-        if file.metadata()?.is_file() {
-            LocalFile {
-                file_path: file.path().display().to_string(),
-                modified: file.metadata()?.modified()?
-            }.insert(conn);
-        }
+    // SET LOG LEVEL
+    if cli.quiet {
+        Builder::new().filter_level(LevelFilter::Error).init();
     }
-
-    // CHECK GLACIER STATE
-    // If glacier_state is empty, populate it from Glacier.
-    if glacier_state_is_empty(conn) {
-        // TODO Load glacier_state from AWS.
-        println!("glacier_file_count: 0");
-        load_from_s3(conn, &s3_client).await;
+    else if cli.debug {
+        Builder::new().filter_level(LevelFilter::Debug).init();
     }
     else {
-        println!("glacier_file_count: >0");
+        Builder::new().filter_level(LevelFilter::Info).init();
     }
-
-    // COMPARE LOCAL STATE WITH GLACIER STATE
-
-    // UPSERT ALL FILES IN GLACIER STATE WITH MISMATCHED MODIFIED AND UPLOADED ROWS
-    fix_pending_upserts(conn, &s3_client).await;
-
-    // DELETE ALL FILES IN GLACIER PENDING DELETION
-    fix_pending_deletes(conn, &s3_client).await;
-
-    // UPLOAD ALL NEW FILES
-    upload_new_files(conn, &s3_client).await;
     
-    // UPDATE ALL CHANGED FILES
-    update_changed_files(conn, &s3_client).await;
-    
-    // ADD DELETE MARKERS TO MISSING FILES
-    delete_missing_files(conn, &s3_client).await;
-    
-    // CLEAR LOCAL STATE FROM DATABASE
-    clear_local_state(conn);
+    // GET CONNECTIONS
+    let s3_client: &mut S3Client = &mut s3::get_client().await;
+    let dynamo_client: &mut DynamoClient = &mut dynamodb::get_client().await;
 
+    // EXECUTE COMMAND
+    match cli.clone().command {
+        Commands::BackupWithEnv(args) => {
+            let yaml: BackupWithEnvYaml = args.into();
 
-    //println!("Loading into db: {file_path} last modified at {modified_str}");
+            backup(yaml.clone().into(), yaml.into(), s3_client, dynamo_client).await?;
+        },
+        Commands::Backup(args) => {
+            backup(cli, args, s3_client, dynamo_client).await?;
+        },
+        Commands::Restore(args) => {
+            restore(cli, args, s3_client, dynamo_client).await?;
+        },
+        Commands::CleanDynamo(args) => {
+            clean_dynamo(args, dynamo_client).await?;
+        }
+        Commands::ClearDatabase(args) => {
+            clear_database(args)?;
+        },
+        Commands::DeleteBackup(args) => {
+            delete_backup(args, s3_client, dynamo_client).await?;
+        }
+    }
 
     Ok(())
 }
 
-async fn load_from_s3(conn: &mut PgConnection, s3_client: &S3Client) {
-    let mut s3_paginator = s3::list(&s3_client, BUCKET_NAME).send();
+fn fix_target_dir(target_dir: String) -> Result<String, Error> {
 
-    while let Some(result) = s3_paginator.next().await {
-        match result {
-            Ok(output) => {
-                for object in output.contents() {
-                    let last_modified: SystemTime = SystemTime::try_from(*object.last_modified().unwrap()).expect("msg");
+    let target_dir = match target_dir.strip_suffix("/") {
+        Some(s) => s.to_owned(),
+        None => target_dir.clone()
+    };
 
-                    GlacierFile {
-                        file_path: object.key().unwrap_or("Unknown").to_string(),
-                        modified: last_modified,
-                        uploaded: Some(last_modified),
-                        pending_delete: false,
-                    }.insert(conn);
-                }
-            }
-            Err(err) => {
-                eprintln!("{err:?}")
-            }
-        }
+    Ok(match target_dir.strip_prefix("./") {
+        Some(s) => {
+            let path = env::current_dir()?.to_str().unwrap().to_string();
+            path + "/" + s
+        },
+        None => target_dir.clone()
+    })
+}
+
+async fn backup(cli: Cli, mut args: BackupArgs, s3_client: &mut S3Client, dynamo_client: &mut DynamoClient) -> Result<(), Error> {
+    // FIX ARGUMENTS
+    args.target_dir = fix_target_dir(args.target_dir.clone())?;
+
+    // Connect to local database
+    let conn: &mut PgConnection = &mut establish_connection(args.clone().into());
+    
+    // Clear local_state from database
+    clear_local_state(conn);
+    
+    // Load files into database from disk
+    backup::load(args.clone(), conn);
+    
+    // If glacier_state is empty, populate it from Glacier.
+    if glacier_state_is_empty(conn) {
+        info!("Glacier state empty. Loading state from DynamoDB and S3...");
+        let _ = restore::postgres_from_aws(cli.clone(), args.clone(), conn, &s3_client, &dynamo_client).await;
     }
+
+    // UPLOAD CHANGES
+    let (successes, failures) = backup::backup(cli.clone(), args.clone(), conn, s3_client, dynamo_client).await;
+    
+    // CLEAR STATE 
+    clear_local_state(conn);
+
+    // PRINT RESULTS
+    info!("Backup complete: {successes} succeeded, {failures} failed.");
+
+    Ok(())
 }
 
-async fn fix_pending_upserts(conn: &mut PgConnection, s3_client: &S3Client) -> isize {
-    let mut failures: isize = 0;
-    let pending_upsert_files: Vec<GlacierFile> = get_pending_upsert_files(conn);
+async fn restore(cli: Cli, mut args: RestoreArgs, s3_client: &mut S3Client, dynamo_client: &mut DynamoClient) -> Result<(), Error> {
+    // FIX ARGUMENTS
+    args.target_dir = fix_target_dir(args.clone().target_dir)?;
 
-    let length = pending_upsert_files.len();
-    println!("pending_upsert_files: {length}");
-
-    for mut file in pending_upsert_files {
-        // TODO Upsert to glacier.
-        match s3::upsert(s3_client, BUCKET_NAME, &file.file_path, &file.file_path).await {
-            Err(_) => {
-                failures += 1;
-            },
-            Ok(_) => {
-                // Copy file.modified to file.updated.
-                file.uploaded = Some(file.modified);
-                file.update(conn);
-            }
-        };
+    match restore::restore(cli, args, s3_client, dynamo_client).await {
+        Ok((restored, failed)) => info!("Restore complete: {restored} restored, {failed} failed."),
+        Err(error) => error!("Restore failed: {:?}", error),
     };
 
-    failures
+    Ok(())
 }
 
-async fn fix_pending_deletes(conn: &mut PgConnection, s3_client: &S3Client) -> isize {
-    let mut failures: isize = 0;
-    let pending_delete_files: Vec<GlacierFile> = get_pending_delete_files(conn);
+async fn clean_dynamo(args: CleanDynamoArgs, dynamo_client: &mut DynamoClient) -> Result<(), Error> {
+    let aws_args = AwsArgs {
+        bucket_name: "".to_string(),
+        dynamo_table: args.dynamo_table.clone()
+    };
+    
+    let hash_trackers = HashTracker::get_all(&dynamo_client, aws_args.clone())
+        .await.unwrap_or(vec![]);
 
-    let length = pending_delete_files.len();
-    println!("pending_delete_files: {length}");
+    for hash_tracker in hash_trackers {
+        let _ = hash_tracker.update(aws_args.clone(), &dynamo_client).await;
+    }
 
-    for file in pending_delete_files {
-        // Delete from glacier.
-        match s3::delete(s3_client, BUCKET_NAME, &file.file_path).await {
-            Err(_) => {
-                failures += 1;
-            },
-            Ok(_) => {
-                // Copy file.modified to file.updated.
-                file.delete(conn);
-            }
-        };
+    Ok(())
+}
+
+fn clear_database(args: ClearDatabaseArgs) -> Result<(), Error> {
+    // Connect to local database
+    let conn: &mut PgConnection = &mut establish_connection(args.clone().into());
+
+    // Clear glacier state
+    clear_glacier_state(conn);
+
+    Ok(())
+}
+
+async fn delete_backup(args: DeleteBackupArgs, s3_client: &mut S3Client, dynamo_client: &mut DynamoClient) -> Result<(), Error> {
+    // Get confirmation
+    let mut buffer = String::new();
+    let stdin = io::stdin();
+    
+    println!("Are you sure you want to delete your backup? (y/n)");
+    stdin.read_line(&mut buffer)?;
+    buffer.retain(|c| !c.is_whitespace());
+
+    if buffer.to_lowercase() != "y" && buffer.to_lowercase() != "yes" {
+        info!("Aborting...");
+        return Ok(());
+    }
+    
+    // Delete all items in DynamoDB
+    match HashTracker::permanently_delete_all(args.clone().into(), dynamo_client).await {
+        Ok(_) => info!("DynamoDB delete all succeeded."),
+        Err(error) => error!("DynamoDB delete all failed: {:?}", error),
     };
 
-    failures
-}
-
-async fn upload_new_files(conn: &mut PgConnection, s3_client: &S3Client) -> isize {
-    let mut failures: isize = 0;
-    let new_files: Vec<LocalFile> = get_new_files(conn);
-
-    let length = new_files.len();
-    println!("new_files: {length}");
-
-    for file in new_files {
-        // Copy from local_state to glacier state, leaving uploaded null.
-        let mut file = GlacierFile {
-            file_path: file.file_path,
-            modified: file.modified,
-            uploaded: None,
-            pending_delete: false
-        }.insert(conn);
-
-        // Upload to glacier.
-        match s3::upsert(s3_client, BUCKET_NAME, &file.file_path, &file.file_path).await {
-            Err(_) => {
-                failures += 1;
-            },
-            Ok(_) => {
-                // Copy file.modified to file.updated.
-                file.uploaded = Some(file.modified);
-                file.update(conn);
-            }
-        };
+    // Delete all items in S3
+    match s3::permanently_delete_all(&s3_client, args.clone().into()).await {
+        Ok(_) => info!("S3 delete all succeeded."),
+        Err(error) => error!("S3 delete all failed: {:?}", error),
     };
 
-    failures
+    Ok(())
 }
-
-async fn update_changed_files(conn: &mut PgConnection, s3_client: &S3Client) -> isize {
-    let mut failures: isize = 0;
-    let updated_files: Vec<LocalFile> = get_changed_files(conn);
-
-    let length = updated_files.len();
-    println!("updated_files: {length}");
-
-    for file in updated_files {
-        // Copy from local_state to glacier state, leaving uploaded as it was.
-        let mut file = GlacierFile {
-            file_path: file.file_path,
-            modified: file.modified,
-            uploaded: None,
-            pending_delete: false
-        }.update(conn);
-
-        // Upload to glacier.
-        match s3::upsert(s3_client, BUCKET_NAME, &file.file_path, &file.file_path).await {
-            Err(_) => {
-                failures += 1;
-            },
-            Ok(_) => {
-                // Copy file.modified to file.updated.
-                file.uploaded = Some(file.modified);
-                file.update(conn);
-            }
-        };
-    };
-
-    failures
-}
-
-async fn delete_missing_files(conn: &mut PgConnection, s3_client: &S3Client) -> isize {
-    let mut failures: isize = 0;
-    let deleted_files: Vec<GlacierFile> = get_missing_files(conn);
-
-    let length = deleted_files.len();
-    println!("deleted_files: {length}");
-
-    for mut file in deleted_files {
-        // Set pending_delete to TRUE.
-        file.pending_delete = true;
-        file.update(conn);
-
-        // Add delete marker.
-        match s3::delete(s3_client, BUCKET_NAME, &file.file_path).await {
-            Err(_) => {
-                failures += 1;
-            },
-            Ok(_) => {
-                // Delete from glacier_state
-                file.delete(conn);
-            }
-        };
-    };
-
-    failures
-}
-
