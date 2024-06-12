@@ -15,8 +15,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
-
+  test:
     runs-on: ubuntu-latest
 
     services:
@@ -46,6 +45,14 @@ jobs:
       run: diesel migration run --database-url postgres://postgres:${{ secrets.POSTGRES_PASSWORD }}@localhost/postgres
     - name: Run tests
       run: cargo test --verbose
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
     - name: Build
       run: cargo build --release
     - name: List files
@@ -56,11 +63,8 @@ jobs:
         cp ./target/release/gda_backup ./release/gda_backup
         cp ./diesel.toml ./release/diesel.toml
         cp -r ./migrations ./release/migrations
-    - name: List files
-      run: ls release -R
-    - uses: montudor/action-zip@v1
-      with:
-        args: zip -qq -r gda_backup.zip release
+        cd migrations
+        zip -r9 ../gda_backup.zip *
     - name: Deploy release
       uses: ncipollo/release-action@v1
       #if: ${{ github.event_name != 'pull_request' }}
