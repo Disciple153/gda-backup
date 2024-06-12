@@ -31,13 +31,13 @@ jobs:
           - 5432:5432
 
     steps:
+    - uses: actions/checkout@v4
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ secrets.AWS_ROLE }}
         aws-region: ${{ vars.AWS_REGION }}
         role-session-name: GitHub-OIDC-gda-backup
-        #role-session-name: GitHub-OIDC-TERRAFORM
     - name: Build
       run: cargo build --verbose
     - name: Install diesel
