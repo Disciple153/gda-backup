@@ -40,8 +40,6 @@ jobs:
         role-to-assume: ${{ secrets.AWS_ROLE }}
         aws-region: ${{ vars.AWS_REGION }}
         role-session-name: GitHub-OIDC-gda-backup
-    - name: Build
-      run: cargo build --verbose
     - name: Install diesel
       run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/diesel-rs/diesel/releases/download/v2.2.0/diesel_cli-installer.sh | sh
     - name: Initialize database
@@ -50,6 +48,8 @@ jobs:
       run: cargo test --verbose
     - name: List files
       run: find ./ -type d 
+    - name: Build
+      run: cargo build --release
     - name: Prepare release
       run: |
         mkdir -p ./release
