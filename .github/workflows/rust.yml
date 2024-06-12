@@ -3,6 +3,7 @@ name: Rust
 on:
   push:
     branches: [ "main" ]
+    tags: ["v*.*.*"]
   pull_request:
     branches: [ "main" ]
 
@@ -51,6 +52,7 @@ jobs:
       if: always()
       run: find ./test_dir -type d 
     - uses: ncipollo/release-action@v1
+      #if: ${{ github.event_name != 'pull_request' }}
       with:
         artifacts: "./target/release/gda_backup,diesel.toml,migrations"
         body: "Test release"

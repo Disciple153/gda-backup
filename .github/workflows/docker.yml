@@ -69,15 +69,32 @@ jobs:
 
       - name: Test docker image
         run: |
+          # Create test files.
           mkdir -p ./backup_test
           touch ./backup_test/test.txt
           touch ./backup_test/test.md
+
+          # Build docker image.
           docker build -t disciple153/gda-backup:0.0.1 .
+
+          # Run compose file.
           docker compose up -d
+
+          # Wait for backup to trigger.
           sleep 65
-          docker logs gda-backup-gda_backup-1
-          docker exec gda-backup-gda_backup-1 gda_backup restore -t "/restore" -b "disciple153-test" -d "gda-backup-test"
-          find ./restore_test -type d 
+
+          # Get backup logs
+          output=$(docker logs gda-backup-gda_backup-1)
+          echo $output
+
+          # Tear down docker containers
+          docker compose down
+
+          # Check to see if backup succeeded
+          if [[ $output != *"Backup complete: 1 succeeded, 0 failed."* ]]; then
+            echo 'Dry run failed. Expected: "Backup complete: 1 succeeded, 0 failed."'
+            exit 1
+          fi
 
       # # Build and push Docker image with Buildx (don't push on PR)
       # # https://github.com/docker/build-push-action
