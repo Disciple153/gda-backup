@@ -72,7 +72,7 @@ jobs:
         with:
           context: .
           load: true
-          tags: disciple153/${{ env.IMAGE_NAME }}:test
+          tags: disciple153/gda-backup:test
 
       - name: Test docker image
         run: |
