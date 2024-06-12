@@ -60,24 +60,6 @@ pub enum S3DeleteError {
     S3BuildError(#[from] BuildError),
 }
 
-/// The function `get_buckets` retrieves a list of S3 buckets using the AWS SDK for
-/// Rust.
-/// 
-/// Arguments:
-/// 
-/// * `client`: The `client` parameter is of type `&Client`, which is a reference to
-/// an AWS SDK S3 client. This client is used to interact with the AWS S3 service to
-/// list buckets.
-/// 
-/// Returns:
-/// 
-/// The function `get_buckets` returns a `Result` containing a vector of
-/// `aws_sdk_s3::types::Bucket` objects or an `Error` in case of failure.
-pub async fn get_buckets(client: &Client) -> Result<Vec<aws_sdk_s3::types::Bucket>, AwsSmithyError> {
-    let resp: aws_sdk_s3::operation::list_buckets::ListBucketsOutput = client.list_buckets().send().await.expect("list_buckets failed");
-    Ok(resp.buckets().to_vec())
-}
-
 /// The function `get_client` asynchronously retrieves a client using AWS
 /// configuration.
 /// 

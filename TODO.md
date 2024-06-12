@@ -3,6 +3,7 @@
 ## Road map
 - Encryption
 - Add ntfy support
+- Set default min_storage duration, and make infinity possible
 - Docker
     - image
     - compose file

@@ -25,11 +25,14 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 
+    /// Set dry run to true to view the list of files that would be backed up without uploading anything. 
     #[arg(long, default_value_t = false)]
     pub dry_run: bool,
 
+    /// Enable debug for more verbose logs.
     #[arg(long, default_value_t = false)]
     pub debug: bool,
+    /// Enable quiet to only display errors.
     #[arg(long, default_value_t = false)]
     pub quiet: bool,
 }
@@ -37,93 +40,115 @@ pub struct Cli {
 #[derive(Debug, Subcommand, Clone)]
 pub enum Commands {
 
-    /// Backups files using a config file and/or environment variables
+    /// Backups files using a config file and/or environment variables.
     BackupWithEnv(BackupWithEnvArgs),
 
-    /// Backups files
+    /// Backups files.
     Backup(BackupArgs),
 
-    /// Restores files
+    /// Restores files.
     Restore(RestoreArgs),
     
-    /// Cleans up dangling dynamo entries
+    /// Cleans up dangling dynamo entries.
     CleanDynamo(CleanDynamoArgs),
 
-    /// Clears the local database
+    /// Clears the local database.
     ClearDatabase(ClearDatabaseArgs),
     
-    /// Clears the remote data
+    /// Clears the remote data.
     DeleteBackup(DeleteBackupArgs),
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct BackupWithEnvArgs {
+    /// The path to a yaml file containing backup arguments. This file contains all of the same arguments as the backup command.
     #[arg()]
     pub config_file: Option<String>,
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct BackupArgs {
+    /// The directory targeted by the backup.  
     #[arg(short = 't', long)]
     pub target_dir: String,
 
+    /// The length of time after an object is created before it will be deleted by S3 lifecycle configurations.
     #[arg(short = 'm', long, default_value_t = 180)]
     pub min_storage_duration: i64,
+    /// A list of regular expressions used to filter files out of backups.
     #[arg(short = 'f', long)]
     pub filter: Vec<String>,
 
+    /// The S3 bucket to which backups will be uploaded. 
     #[arg(short = 'b', long)]
     bucket_name: String,
+    /// The DynamoDB table which will store backup related metadata.
     #[arg(short = 'd', long)]
     dynamo_table: String,
     
+    /// The engine of the local database. (Only postgres is supported.)
     #[arg(short = 'e', long)]
     db_engine: String,
+    /// The username of the postgres database.
     #[arg(short = 'u', long)]
     postgres_user: String,
+    /// The password to the postgres database.
     #[arg(short = 'p', long)]
     postgres_password: String,
+    /// The hostname of the postgres database.
     #[arg(short = 'a', long)]
     postgres_host: String,
+    /// The name of the postgres database.
     #[arg(short = 'n', long)]
     postgres_db: String,
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct RestoreArgs {
+    /// The directory targeted by the backup.  
     #[arg(short = 't', long)]
     pub target_dir: String,
 
+    /// The S3 bucket which contains your backup. 
     #[arg(short = 'b', long)]
     bucket_name: String,
+    /// The DynamoDB contains your backup metadata.
     #[arg(short = 'd', long)]
     dynamo_table: String,
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct CleanDynamoArgs {
+    /// The DynamoDB contains your backup metadata.
     #[arg(short = 'd', long)]
     pub dynamo_table: String,
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct ClearDatabaseArgs {
+    /// The engine of the local database. (Only postgres is supported.)
     #[arg(short = 'e', long)]
     db_engine: String,
+    /// The username of the postgres database.
     #[arg(short = 'u', long)]
     postgres_user: String,
+    /// The password to the postgres database.
     #[arg(short = 'p', long)]
     postgres_password: String,
+    /// The hostname of the postgres database.
     #[arg(short = 'a', long)]
     postgres_host: String,
+    /// The name of the postgres database.
     #[arg(short = 'n', long)]
     postgres_db: String,
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct DeleteBackupArgs {
+    /// The S3 bucket which contains your backup. 
     #[arg(short = 'b', long)]
     bucket_name: String,
+    /// The DynamoDB contains your backup metadata.
     #[arg(short = 'd', long)]
     dynamo_table: String,
 }
@@ -166,7 +191,7 @@ impl BackupWithEnvYaml {
     }
 }
 
-// GENERIC ARGUMENT STRUCTS
+// YAML STRUCTS AND HELPERS
 
 impl From<BackupWithEnvArgs> for BackupWithEnvYaml {
     fn from(args: BackupWithEnvArgs) -> Self {
@@ -268,6 +293,8 @@ fn get_var_bool(yaml_value: Option<bool>, env_key: &str) -> bool {
         }
     }
 }
+
+// GENERIC ARGUMENT STRUCTS
 
 #[derive(Debug, Clone)]
 pub struct DatabaseArgs {

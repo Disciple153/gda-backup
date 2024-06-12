@@ -15,17 +15,17 @@ services:
       - ./backup_test:/backup:ro
       - ./restore_test:/restore
 
-  database: # If the name of the database is changed, the POSTGRES_HOST environment variable must be set to its name
+  database:
     image: 'postgres:latest'
     env_file:
       - .env
     volumes:
-      - postgres_volume:/var/lib/postgresql/data
+      - gda_backup_volume:/var/lib/postgresql/data
     networks:
       - gda_backup_network
 
 volumes:
-  postgres_volume:
+  gda_backup_volume:
 
 networks:
   gda_backup_network:
@@ -36,9 +36,8 @@ configs:
       dry_run: true
       log_level: debug
       target_dir: /backup
-      bucket_name: disciple153-test
-      dynamo_table: gda-backup-test
+      bucket_name: my-bucket
+      dynamo_table: my-table
       filters:
-        - "test1"
-        - "filter2"
+        - ".txt$"
       min_storage_duration: 1
