@@ -25,6 +25,6 @@ jobs:
       with:
         compose-file: ./tests/docker-compose.yml
     - name: Initialize database
-      run: diesel migration run
+      run: diesel migration run --config file ./tests/.env
     - name: Run tests
       run: cargo test --verbose
