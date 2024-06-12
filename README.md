@@ -65,6 +65,7 @@ configs:
 | BACKUP_CRON            | yes      |            | A UTC cron expression that defines when backups will run.                                               |
 | TARGET_DIR:            | no       | "/backup"  | The directory targeted by automatic backups.                                                            |
 | FILTER:                | no       |            | A regular expression used to filter files out of backups.                                               |
+| FILTER_DELIMITER:      | no       |            | A delimiter that if supplied, can be used to split "FILTER" into multiple regex strings.                |
 | DRY_RUN:               | no       | false      | Set dry run to true to view the list of files that would be backed up without uploading anything.       |
 | LOG_LEVEL:             | no       | "info"     | Set to "debug" for more verbose logs, or "quiet" to only display errors.                                |
 | DB_ENGINE:             | no       | "postgres" | The engine of the local database. (Only postgres is supported.)                                         |
@@ -119,21 +120,25 @@ docker exec gda-backup-gda_backup-1 gda_backup restore \
 To use this program from the command line, you must have Rust/Cargo, and Diesel installed, and must have a postgres database running.
 
 To install Rust/Cargo:
+
 ```bash
 curl https://sh.rustup.rs -sSf | sh
 ```
 
 To install Diesel"
+
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/diesel-rs/diesel/releases/download/v2.2.0/diesel_cli-installer.sh | sh
 ```
 
 To start a postgres database with docker:
+
 ```bash
 docker run --name database -e POSTGRES_PASSWORD=password -d
 ```
 
-From the root of the project directory, run: 
+From the root of the project directory, run:
+
 ```bash
 diesel migration run
 ```
@@ -141,6 +146,7 @@ diesel migration run
 Next download and extract the latest release.
 
 Finally you can run gda_backup:
+
 ```bash
 # If you cloned the repository
 cargo run -- help
@@ -156,39 +162,36 @@ You can remove permissions to ensure certain actions are not possible.
 
 ```json
 {
-	"Version": "2012-10-17",
-	"Statement": [
-		{
-			"Sid": "S3Actions",
-			"Effect": "Allow",
-			"Action": [
-				"s3:DeleteObject",
-				"s3:DeleteObjectVersion",
-				"s3:GetObject",
-				"s3:ListBucket",
-				"s3:ListBucketVersions",
-				"s3:PutObject",
-				"s3:RestoreObject"
-			],
-			"Resource": [
-				"arn:aws:s3:::my-bucket/*",
-				"arn:aws:s3:::my-bucket"
-			]
-		},
-        		{
-			"Sid": "DynamoDbActions",
-			"Effect": "Allow",
-			"Action": [
-				"dynamodb:DeleteItem",
-				"dynamodb:GetItem",
-				"dynamodb:PutItem",
-				"dynamodb:Scan"
-			],
-			"Resource": [
-				"arn:aws:dynamodb:us-east-1:387145356314:table/my-table",
-				"arn:aws:dynamodb:us-east-1:387145356314:table/my-table/index/hash"
-			]
-		}
-	]
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3Actions",
+      "Effect": "Allow",
+      "Action": [
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+        "s3:GetObject",
+        "s3:ListBucket",
+        "s3:ListBucketVersions",
+        "s3:PutObject",
+        "s3:RestoreObject"
+      ],
+      "Resource": ["arn:aws:s3:::my-bucket/*", "arn:aws:s3:::my-bucket"]
+    },
+    {
+      "Sid": "DynamoDbActions",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DeleteItem",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:Scan"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:387145356314:table/my-table",
+        "arn:aws:dynamodb:us-east-1:387145356314:table/my-table/index/hash"
+      ]
+    }
+  ]
 }
 ```

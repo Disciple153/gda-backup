@@ -10,6 +10,7 @@ const LOG_LEVEL: &str = "LOG_LEVEL";
 const TARGET_DIR: &str = "TARGET_DIR";
 const MIN_STORAGE_DURATION: &str = "MIN_STORAGE_DURATION";
 const FILTER: &str = "FILTER";
+const FILTER_DELIMITER: &str = "FILTER_DELIMITER";
 const BUCKET_NAME: &str = "BUCKET_NAME";
 const DYNAMO_TABLE: &str = "DYNAMO_TABLE";
 const DB_ENGINE: &str = "DB_ENGINE";
@@ -224,6 +225,7 @@ impl From<BackupWithEnvYaml> for BackupArgs {
         let postgres_password = get_var(yaml.postgres_password, POSTGRES_PASSWORD);
         let postgres_host = get_var(yaml.postgres_host, POSTGRES_HOST);
         let postgres_db = get_var(yaml.postgres_db, POSTGRES_DB);
+        let filter_delimiter = env::var(FILTER_DELIMITER).ok();
 
         let min_storage_duration = match yaml.min_storage_duration {
             Some(value) => value,
@@ -235,11 +237,16 @@ impl From<BackupWithEnvYaml> for BackupArgs {
                 Err(_) => panic!("Missing environment variable: {MIN_STORAGE_DURATION}"),
             }
         };
-
+        
         let filter = match yaml.filter {
             Some(value) => value,
             None => match env::var(FILTER) {
-                Ok(value) => vec![value],
+                Ok(value) => {
+                    match filter_delimiter {
+                        Some(delimiter) => value.split(&delimiter).map(|v| v.to_string()).collect(),
+                        None => vec![value],
+                    }
+                },
                 Err(_) => vec![],
             },
         };
@@ -263,7 +270,14 @@ impl From<BackupWithEnvYaml> for Cli {
     fn from(yaml: BackupWithEnvYaml) -> Self {
 
         let dry_run = get_var_bool(yaml.dry_run.clone(), DRY_RUN);
-        let log_level = get_var(yaml.log_level.clone(), LOG_LEVEL);
+
+        let log_level = match yaml.log_level.clone() {
+            Some(value) => value,
+            None => match env::var(LOG_LEVEL) {
+                Ok(value) => value,
+                Err(_) => "".to_owned(),
+            }
+        };
 
         Cli {
             command: Commands::Backup(yaml.into()),
