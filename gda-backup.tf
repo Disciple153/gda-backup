@@ -74,7 +74,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "gda_backup_lifecycle" {
 # This must be enabled to avoid early deletion fees when using Glacier Deep 
 # Archive.
 resource "aws_s3_bucket_versioning" "gda_backup_versioning" {
-  bucket = aws_s3_bucket.glacier_backup.id
+  bucket = aws_s3_bucket.gda_backup_bucket.id
   versioning_configuration {
     status = "Enabled"
   }
@@ -114,8 +114,8 @@ data "aws_iam_policy_document" "gda_backup_policy" {
       "s3:RestoreObject",
     ]
     resources = [
-      "arn:aws:s3:::${aws_s3_bucket.gda_backup_bucket.id}/*",
-      "arn:aws:s3:::${aws_s3_bucket.gda_backup_bucket.id}",
+      aws_s3_bucket.gda_backup_bucket.arn,
+      "${aws_s3_bucket.gda_backup_bucket.arn}/*",
     ]
   }
   statement {
@@ -127,8 +127,8 @@ data "aws_iam_policy_document" "gda_backup_policy" {
       "dynamodb:Scan",
     ]
     resources = [
-      "arn:aws:dynamodb:us-east-1:387145356314:table/${aws_dynamodb_table.gda_backup_table.id}",
-      "arn:aws:dynamodb:us-east-1:387145356314:table/${aws_dynamodb_table.gda_backup_table.id}/index/hash"
+      aws_dynamodb_table.gda_backup_table.arn,
+      "${aws_dynamodb_table.gda_backup_table.arn}/index/hash",
     ]
   }
 }
@@ -138,7 +138,6 @@ resource "aws_iam_user" "gda_backup_user" {
 }
 
 resource "aws_iam_user_policy" "gda_backup_user_policy" {
-  name   = "test"
   user   = aws_iam_user.gda_backup_user.name
   policy = data.aws_iam_policy_document.gda_backup_policy.json
 }
