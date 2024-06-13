@@ -68,6 +68,14 @@ networks:
 | AWS_SECRET_ACCESS_KEY: | yes      |            | The AWS secret access key used to access S3 and DynamoDB.                                               |
 | AWS_DEFAULT_REGION:    | yes      |            | The AWS region containing your S3 bucket and DynamoDB table.                                            |
 
+### Unscheduled Backup
+
+To perform a backup outside of the cron job, run the following command:
+
+```bash
+docker exec gda_backup gda_backup backup
+```
+
 ### Restore
 
 To restore your backups to a file, run the following command:

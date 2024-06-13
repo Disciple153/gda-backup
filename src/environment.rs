@@ -97,7 +97,7 @@ pub struct BackupArgs {
 #[derive(Debug, Args, Clone)]
 pub struct RestoreArgs {
     /// The directory targeted by the backup.  
-    #[arg(short = 't', long, env)]
+    #[arg(short = 't', long)]
     pub target_dir: String,
 
     /// The S3 bucket which contains your backup. 
