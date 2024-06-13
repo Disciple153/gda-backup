@@ -12,9 +12,7 @@ use crate::s3;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_dynamodb::Client as DynamoClient;
 use chrono::{
-    DateTime,
-    Duration,
-    Utc,
+    DateTime, Duration, Utc
 };
 use diesel::prelude::PgConnection;
 
@@ -425,22 +423,29 @@ async fn get_hash_tracker_change<'a>(args: BackupArgs, dynamo_client: &DynamoCli
     hash_tracker_changes.get_mut(&hash).unwrap()
 }
 
-/// The function `new_expiration` calculates a new expiration date based on the
-/// current time and a minimum storage duration in Rust.
+/// The function `new_expiration` calculates a new expiration date based on a
+/// minimum storage duration provided as an input.
 /// 
 /// Arguments:
 /// 
-/// * `min_storage_duration`: The `min_storage_duration` parameter in the
-/// `new_expiration` function represents the minimum duration in days for which an
-/// item should be stored before it expires. This value is used to calculate the
-/// expiration time by adding the specified number of days to the current time.
+/// * `min_storage_duration`: The `min_storage_duration` parameter is an optional
+/// integer value representing the minimum storage duration in days. If a value is
+/// provided, the function will calculate the new expiration date by adding the
+/// specified number of days to the current date and time. If no value is provided
+/// (i.e., `None`
 /// 
 /// Returns:
 /// 
-/// A `DateTime<Utc>` value is being returned. The function `new_expiration`
-/// calculates a new expiration time based on the current time (`Utc::now()`) and a
-/// minimum storage duration provided as input.
-fn new_expiration(min_storage_duration: i64) -> DateTime<Utc> {
+/// The function `new_expiration` returns a `DateTime<Utc>` value.
+fn new_expiration(min_storage_duration: Option<i64>) -> DateTime<Utc> {
+
+    let min_storage_duration = match min_storage_duration {
+        Some(value) => value,
+        None => {
+            return DateTime::<Utc>::MAX_UTC;
+        },
+    };
+
     match Utc::now().checked_add_signed(Duration::days(min_storage_duration)) {
         Some(time) => time,
         None => DateTime::UNIX_EPOCH,
