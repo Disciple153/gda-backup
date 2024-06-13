@@ -33,6 +33,7 @@ ENV POSTGRES_USER=postgres
 ENV POSTGRES_DB=postgres
 ENV TARGET_DIR="/backup"
 ENV PATH="${PATH}:/gda_backup/target/release"
+ENV FILTER_DELIMITER=":"
 
 # Start
 CMD ["./docker/start.sh"]

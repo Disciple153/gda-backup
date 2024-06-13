@@ -1,3 +1,3 @@
 #! /bin/bash
 
-/gda_backup/target/release/gda_backup backup-with-env /gda_backup_config &>> /var/log/docker.log
+/gda_backup/target/release/gda_backup backup-with-env &>> /var/log/docker.log

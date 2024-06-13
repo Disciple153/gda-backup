@@ -14,6 +14,7 @@ diesel migration run
 
 # Configure cron job for periodic backups
 touch /var/log/docker.log
+echo Loading cron: "$BACKUP_CRON"
 echo "$BACKUP_CRON /gda_backup/docker/backup.sh" | crontab -
 cron
 
