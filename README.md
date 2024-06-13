@@ -67,7 +67,7 @@ networks:
 | AWS_ACCESS_KEY_ID:     | yes      |            | The AWS access key id used to access S3 and DynamoDB.                                                   |
 | AWS_SECRET_ACCESS_KEY: | yes      |            | The AWS secret access key used to access S3 and DynamoDB.                                               |
 | AWS_DEFAULT_REGION:    | yes      |            | The AWS region containing your S3 bucket and DynamoDB table.                                            |
-| NTFY_URL:              | no       |            | The URL of your ntfy server.                                                                            |
+| NTFY_URL:              | no       |            | The URL of the ntfy server gda_backup will publish to.                                                  |
 | NTFY_TOPIC:            | no       |            | The ntfy topic gda_backup will publish to.                                                              |
 | NTFY_USERNAME:         | no       |            | The ntfy user gda_backup will use to publish messages.                                                  |
 | NTFY_PASSWORD:         | no       |            | The password of the ntfy user gda_backup will use.                                                      |
