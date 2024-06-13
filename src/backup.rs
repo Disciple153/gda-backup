@@ -120,7 +120,7 @@ pub fn load(args: BackupArgs, conn: &mut PgConnection) {
             }
 
             if filtered {
-                info!("File filtered out of tracked files: {file_path}");
+                debug!("File filtered out of tracked files: {file_path}");
                 continue;
             }
     

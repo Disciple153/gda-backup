@@ -84,6 +84,8 @@ docker exec gda_backup gda_backup restore \
 
 ### Terraform
 
+If you are using terraform, you can deploy gda_backup and all required AWS resources using the provided [terraform stack](./gda-backup.tf).
+
 ## Command line
 
 To use this program from the command line, you must have Rust/Cargo, and Diesel installed, and must have a postgres database running.
@@ -124,10 +126,35 @@ cargo run -- help
 gda_backup help
 ```
 
-## AWS Role
+## AWS Resources
 
-Here is a role which will enable all features of GDA Backup.
-You can remove permissions to ensure certain actions are not possible.
+GDA Backup requires an S3 bucket and a DynamoDB table to operate as well as an IAM Role to access those resources.
+
+### S3 Bucket
+
+The bucket you create should have these settings:
+- Versioning: enabled
+  - This ensures that objects are not overwritten before the minimum storage duration has elapsed.
+- Lifecycle_policies
+  - Move objects to a cheaper storage tier.
+  - Delete non-current objects.
+    - Make sure that `noncurrent days` is set to a value greater than the minimum storage duration for the storage class you are using. (For Glacier Deep archive, this is 180 days)
+
+### DynamoDB table
+
+The DynamoDB table you create should have these settings:
+- Hash value:
+  - Name: `hash`
+  - Type: `S` 
+- Billing mode:
+  - `PAY_PER_REQUEST` aka Serverless
+- Table class
+  - Standard is recommended for the initial backup.
+  - Switch to Standard-IA after the initial backup is complete.
+
+### IAM Role
+
+This role which will enables all features of GDA Backup.
 
 ```json
 {
@@ -164,3 +191,35 @@ You can remove permissions to ensure certain actions are not possible.
   ]
 }
 ```
+
+This role which will only enables the backup feature.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3Actions",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:RestoreObject"
+      ],
+      "Resource": ["arn:aws:s3:::my-bucket/*", "arn:aws:s3:::my-bucket"]
+    },
+    {
+      "Sid": "DynamoDbActions",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DeleteItem",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:387145356314:table/my-table",
+        "arn:aws:dynamodb:us-east-1:387145356314:table/my-table/index/hash"
+      ]
+    }
+  ]
+}

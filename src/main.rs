@@ -155,9 +155,15 @@ fn fix_filter(args: BackupArgs) -> Vec<String> {
 /// 
 /// The `backup` function is returning a `Result<(), Error>`.
 async fn backup(cli: Cli, mut args: BackupArgs, dispatcher: Option<Dispatcher>, s3_client: &mut S3Client, dynamo_client: &mut DynamoClient) -> Result<(), Error> {
+    
     // FIX ARGUMENTS
     args.target_dir = fix_target_dir(args.target_dir.clone())?;
     args.filter = fix_filter(args.clone());
+
+    ntfy(cli.clone(), dispatcher.clone(), "Backup starting", 
+        format!("Starting backup of {}", args.target_dir.clone()), 
+        Priority::Default
+    ).await;
 
     // Connect to local database
     let conn: &mut PgConnection = &mut establish_connection(args.clone().into());
@@ -185,14 +191,14 @@ async fn backup(cli: Cli, mut args: BackupArgs, dispatcher: Option<Dispatcher>, 
 
     if failures == 0 {
         ntfy(cli, dispatcher, "Backup complete", 
-            format!("{successes} succeeded, {failures} failed."), 
+            format!("Completed backup of {}, {successes} succeeded, {failures} failed.", args.target_dir), 
             Priority::Default
         ).await;
     }
     else {
         ntfy(cli, dispatcher, "Backup complete with failures", 
-            format!("{successes} succeeded, {failures} failed."),
-            Priority::Default
+            format!("Failed backup of {}, {successes} succeeded, {failures} failed.", args.target_dir),
+            Priority::High
         ).await;
     }
 
