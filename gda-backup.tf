@@ -114,8 +114,8 @@ data "aws_iam_policy_document" "gda_backup_policy" {
       "s3:RestoreObject",
     ]
     resources = [
-      "arn:aws:s3:::${aws_s3_bucket.glacier_backup.id}/*",
-      "arn:aws:s3:::${aws_s3_bucket.glacier_backup.id}",
+      "arn:aws:s3:::${aws_s3_bucket.gda_backup_bucket.id}/*",
+      "arn:aws:s3:::${aws_s3_bucket.gda_backup_bucket.id}",
     ]
   }
   statement {
