@@ -40,7 +40,7 @@ jobs:
       - name: Build docker image
         run: |
           # Build docker image.
-          docker build -t disciple153/gda-backup:0.0.1 .
+          docker build -t disciple153/gda-backup:latest .
 
       - name: Test docker image
         run: |

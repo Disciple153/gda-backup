@@ -8,8 +8,10 @@ use diesel::prelude::PgConnection;
 use log::{LevelFilter, error, info};
 use env_logger::Builder;
 
+use ntfy::{Auth, Dispatcher, Payload, Priority};
+
 use gda_backup::environment::{
-    AwsArgs, BackupArgs, BackupWithEnvYaml, CleanDynamoArgs, ClearDatabaseArgs, Cli, Commands, DeleteBackupArgs, RestoreArgs
+    AwsArgs, BackupArgs, CleanDynamoArgs, ClearDatabaseArgs, Cli, Commands, DeleteBackupArgs, RestoreArgs
 };
 
 use gda_backup::{
@@ -26,15 +28,16 @@ use gda_backup::dynamodb::{self, HashTracker};
 async fn main() -> Result<(), Error> {
 
     // ARGUMENTS
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
 
-    let cli = match cli.command {
-        Commands::BackupWithEnv(args) => {
-            let yaml: BackupWithEnvYaml = args.into();
-            yaml.clone().into()
-        },
-        _ => cli
-    };
+    if let Commands::BackupWithEnv(_) = cli.command {
+        cli.get_env();
+    }
+
+    let cli = cli;
+
+
+    let dispatcher = ntfy_dispatcher(cli.clone());
 
     // SET LOG LEVEL
     if cli.quiet {
@@ -54,12 +57,10 @@ async fn main() -> Result<(), Error> {
     // EXECUTE COMMAND
     match cli.clone().command {
         Commands::BackupWithEnv(args) => {
-            let yaml: BackupWithEnvYaml = args.into();
-
-            backup(yaml.clone().into(), yaml.into(), s3_client, dynamo_client).await?;
+            backup(cli, args.into(), dispatcher, s3_client, dynamo_client).await?;
         },
         Commands::Backup(args) => {
-            backup(cli, args, s3_client, dynamo_client).await?;
+            backup(cli, args, dispatcher, s3_client, dynamo_client).await?;
         },
         Commands::Restore(args) => {
             restore(cli, args, s3_client, dynamo_client).await?;
@@ -94,7 +95,7 @@ fn fix_target_dir(target_dir: String) -> Result<String, Error> {
     })
 }
 
-async fn backup(cli: Cli, mut args: BackupArgs, s3_client: &mut S3Client, dynamo_client: &mut DynamoClient) -> Result<(), Error> {
+async fn backup(cli: Cli, mut args: BackupArgs, dispatcher: Option<Dispatcher>, s3_client: &mut S3Client, dynamo_client: &mut DynamoClient) -> Result<(), Error> {
     // FIX ARGUMENTS
     args.target_dir = fix_target_dir(args.target_dir.clone())?;
 
@@ -121,6 +122,19 @@ async fn backup(cli: Cli, mut args: BackupArgs, s3_client: &mut S3Client, dynamo
 
     // PRINT RESULTS
     info!("Backup complete: {successes} succeeded, {failures} failed.");
+
+    if failures == 0 {
+        ntfy(cli, dispatcher, "Backup complete", 
+            format!("{successes} succeeded, {failures} failed."), 
+            Priority::Default
+        ).await;
+    }
+    else {
+        ntfy(cli, dispatcher, "Backup complete with failures", 
+            format!("{successes} succeeded, {failures} failed."),
+            Priority::Default
+        ).await;
+    }
 
     Ok(())
 }
@@ -190,4 +204,35 @@ async fn delete_backup(args: DeleteBackupArgs, s3_client: &mut S3Client, dynamo_
     };
 
     Ok(())
+}
+
+async fn ntfy(cli: Cli, dispatcher: Option<Dispatcher>, title: &str, message: String, priority: Priority) {
+    if let Some(dispatcher) = dispatcher {
+        let result = dispatcher.send(&Payload::new(cli.ntfy_topic.unwrap())
+            .message(message) // Add optional message
+            .title(title) // Add optional title
+            .priority(priority) // Edit priority
+            .markdown(true)
+        ).await; // Use markdown).await.unwrap();
+
+        if let Err(error) = result {
+            error!("Failed to send ntfy message: {:?}", error);
+        };
+    };
+}
+
+fn ntfy_dispatcher(cli: Cli) -> Option<Dispatcher> {
+
+    if !cli.ntfy_topic.is_some() || !cli.ntfy_url.is_some() {
+        info!("ntfy disabled. Missing url or topic.");
+        return None;
+    }
+
+    let mut dispatcher = Dispatcher::builder(cli.ntfy_url.unwrap());
+
+    if cli.ntfy_username.is_some() && cli.ntfy_password.is_some() {
+        dispatcher = dispatcher.credentials(Auth::new(cli.ntfy_username.unwrap(), cli.ntfy_password.unwrap()))
+    };
+
+    dispatcher.build().ok()
 }

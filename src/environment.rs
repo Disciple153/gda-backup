@@ -1,7 +1,6 @@
 use std::env;
 
 use clap::{Args, Parser, Subcommand};
-use serde::Deserialize;
 
 const DRY_RUN: &str = "DRY_RUN";
 const DEBUG: &str = "debug";
@@ -18,6 +17,11 @@ const POSTGRES_USER: &str = "POSTGRES_USER";
 const POSTGRES_PASSWORD: &str = "POSTGRES_PASSWORD";
 const POSTGRES_HOST: &str = "POSTGRES_HOST";
 const POSTGRES_DB: &str = "POSTGRES_DB";
+
+const NTFY_URL: &str = "NTFY_URL";
+const NTFY_USERNAME: &str = "NTFY_USERNAME";
+const NTFY_PASSWORD: &str = "NTFY_PASSWORD";
+const NTFY_TOPIC: &str = "NTFY_TOPIC";
 
 #[derive(Debug, Parser, Clone)]
 #[command(version, about, long_about = None)]
@@ -36,6 +40,22 @@ pub struct Cli {
     /// Enable quiet to only display errors.
     #[arg(long, default_value_t = false)]
     pub quiet: bool,
+
+    /// ntfy url.
+    #[arg(long)]
+    pub ntfy_url: Option<String>,
+
+    /// ntfy username.
+    #[arg(long)]
+    pub ntfy_username: Option<String>,
+
+    /// ntfy password.
+    #[arg(long)]
+    pub ntfy_password: Option<String>,
+
+    /// ntfy topic.
+    #[arg(long)]
+    pub ntfy_topic: Option<String>,
 }
 
 #[derive(Debug, Subcommand, Clone)]
@@ -62,9 +82,39 @@ pub enum Commands {
 
 #[derive(Debug, Args, Clone)]
 pub struct BackupWithEnvArgs {
-    /// The path to a yaml file containing backup arguments. This file contains all of the same arguments as the backup command.
-    #[arg()]
-    pub config_file: Option<String>,
+        /// The directory targeted by the backup.  
+        #[arg(short = 't', long)]
+        pub target_dir: Option<String>,
+    
+        /// The length of time after an object is created before it will be deleted by S3 lifecycle configurations.
+        #[arg(short = 'm', long)]
+        pub min_storage_duration: Option<i64>,
+        /// A list of regular expressions used to filter files out of backups.
+        #[arg(short = 'f', long)]
+        pub filter: Vec<String>,
+    
+        /// The S3 bucket to which backups will be uploaded. 
+        #[arg(short = 'b', long)]
+        bucket_name: Option<String>,
+        /// The DynamoDB table which will store backup related metadata.
+        #[arg(short = 'd', long)]
+        dynamo_table: Option<String>,
+        
+        /// The engine of the local database. (Only postgres is supported.)
+        #[arg(short = 'e', long)]
+        db_engine: Option<String>,
+        /// The username of the postgres database.
+        #[arg(short = 'u', long)]
+        postgres_user: Option<String>,
+        /// The password to the postgres database.
+        #[arg(short = 'p', long)]
+        postgres_password: Option<String>,
+        /// The hostname of the postgres database.
+        #[arg(short = 'a', long)]
+        postgres_host: Option<String>,
+        /// The name of the postgres database.
+        #[arg(short = 'n', long)]
+        postgres_db: Option<String>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -155,79 +205,20 @@ pub struct DeleteBackupArgs {
 }
 
 
-// YAML SPEC
-#[derive(Debug, Deserialize, Clone)]
-pub struct BackupWithEnvYaml {
-    dry_run: Option<bool>,
-    log_level: Option<String>,
-    target_dir: Option<String>,
-    min_storage_duration: Option<i64>,
-    filter: Option<Vec<String>>,
-    bucket_name: Option<String>,
-    dynamo_table: Option<String>,
-    db_engine: Option<String>,
-    postgres_user: Option<String>,
-    postgres_password: Option<String>,
-    postgres_host: Option<String>,
-    postgres_db: Option<String>,
-}
+impl From<BackupWithEnvArgs> for BackupArgs {
+    fn from(env_args: BackupWithEnvArgs) -> Self {
 
-// STRUCT CONSTRUCTORS
-impl BackupWithEnvYaml {
-    pub fn empty() -> BackupWithEnvYaml {
-        BackupWithEnvYaml {
-            target_dir: None,
-            min_storage_duration: None,
-            filter: None,
-            bucket_name: None,
-            dynamo_table: None,
-            db_engine: None,
-            postgres_user: None,
-            postgres_password: None,
-            postgres_host: None,
-            postgres_db: None,
-            dry_run: None,
-            log_level: None,
-        }
-    }
-}
-
-// YAML STRUCTS AND HELPERS
-
-impl From<BackupWithEnvArgs> for BackupWithEnvYaml {
-    fn from(args: BackupWithEnvArgs) -> Self {
-
-        let Some(config_path) = args.config_file else {
-            return BackupWithEnvYaml::empty();
-        };
-
-        let Ok(config_file) = std::fs::File::open(config_path) else {
-            return BackupWithEnvYaml::empty();
-        };
-
-        let yaml = match serde_yml::from_reader(config_file) {
-            Ok(value) => value,
-            Err(_) => return BackupWithEnvYaml::empty()
-        };
-
-        yaml
-    }
-}
-
-impl From<BackupWithEnvYaml> for BackupArgs {
-    fn from(yaml: BackupWithEnvYaml) -> Self {
-
-        let target_dir = get_var(yaml.target_dir, TARGET_DIR);
-        let bucket_name = get_var(yaml.bucket_name, BUCKET_NAME);
-        let dynamo_table = get_var(yaml.dynamo_table, DYNAMO_TABLE);
-        let db_engine = get_var(yaml.db_engine, DB_ENGINE);
-        let postgres_user = get_var(yaml.postgres_user, POSTGRES_USER);
-        let postgres_password = get_var(yaml.postgres_password, POSTGRES_PASSWORD);
-        let postgres_host = get_var(yaml.postgres_host, POSTGRES_HOST);
-        let postgres_db = get_var(yaml.postgres_db, POSTGRES_DB);
+        let target_dir = get_var(env_args.target_dir, TARGET_DIR);
+        let bucket_name = get_var(env_args.bucket_name, BUCKET_NAME);
+        let dynamo_table = get_var(env_args.dynamo_table, DYNAMO_TABLE);
+        let db_engine = get_var(env_args.db_engine, DB_ENGINE);
+        let postgres_user = get_var(env_args.postgres_user, POSTGRES_USER);
+        let postgres_password = get_var(env_args.postgres_password, POSTGRES_PASSWORD);
+        let postgres_host = get_var(env_args.postgres_host, POSTGRES_HOST);
+        let postgres_db = get_var(env_args.postgres_db, POSTGRES_DB);
         let filter_delimiter = env::var(FILTER_DELIMITER).ok();
 
-        let min_storage_duration = match yaml.min_storage_duration {
+        let min_storage_duration = match env_args.min_storage_duration {
             Some(value) => value,
             None => match env::var(MIN_STORAGE_DURATION) {
                 Ok(value) => match value.parse::<i64>() {
@@ -237,10 +228,12 @@ impl From<BackupWithEnvYaml> for BackupArgs {
                 Err(_) => panic!("Missing environment variable: {MIN_STORAGE_DURATION}"),
             }
         };
-        
-        let filter = match yaml.filter {
-            Some(value) => value,
-            None => match env::var(FILTER) {
+
+        let filter = if env_args.filter.len() > 0 {
+            env_args.filter
+        }
+        else {
+            match env::var(FILTER) {
                 Ok(value) => {
                     match filter_delimiter {
                         Some(delimiter) => value.split(&delimiter).map(|v| v.to_string()).collect(),
@@ -248,7 +241,7 @@ impl From<BackupWithEnvYaml> for BackupArgs {
                     }
                 },
                 Err(_) => vec![],
-            },
+            }
         };
 
         BackupArgs {
@@ -266,25 +259,53 @@ impl From<BackupWithEnvYaml> for BackupArgs {
     }
 }
 
-impl From<BackupWithEnvYaml> for Cli {
-    fn from(yaml: BackupWithEnvYaml) -> Self {
-
-        let dry_run = get_var_bool(yaml.dry_run.clone(), DRY_RUN);
-
-        let log_level = match yaml.log_level.clone() {
-            Some(value) => value,
-            None => match env::var(LOG_LEVEL) {
-                Ok(value) => value,
-                Err(_) => "".to_owned(),
+impl Cli {
+    pub fn get_env(&mut self) {
+        self.dry_run = match env::var(DRY_RUN) {
+            Ok(value) => {
+                if value.to_lowercase() == "true" {
+                    true
+                }
+                else if value.to_lowercase() == "false" {
+                    false
+                }
+                else {
+                    self.dry_run
+                }
+            },
+            Err(_) => self.dry_run,
+        };
+        
+        if let Ok(value) = env::var(LOG_LEVEL) {
+            if value.to_lowercase() == DEBUG {
+                self.debug = true;
+                self.quiet = false;
+            }
+            else if value.to_lowercase() == QUIET {
+                self.debug = false;
+                self.quiet = true;
             }
         };
 
-        Cli {
-            command: Commands::Backup(yaml.into()),
-            dry_run,
-            debug: log_level.to_lowercase() == DEBUG,
-            quiet: log_level.to_lowercase() == QUIET,
-        }
+        self.ntfy_url = match &self.ntfy_url {
+            Some(value) => Some(value.to_string()),
+            None => env::var(NTFY_URL).ok(),
+        };
+
+        self.ntfy_topic = match &self.ntfy_topic {
+            Some(value) => Some(value.to_string()),
+            None => env::var(NTFY_TOPIC).ok(),
+        };
+
+        self.ntfy_username = match &self.ntfy_username {
+            Some(value) => Some(value.to_string()),
+            None => env::var(NTFY_USERNAME).ok(),
+        };
+
+        self.ntfy_password = match &self.ntfy_password {
+            Some(value) => Some(value.to_string()),
+            None => env::var(NTFY_PASSWORD).ok(),
+        };
     }
 }
 
@@ -294,16 +315,6 @@ fn get_var(yaml_value: Option<String>, env_key: &str) -> String {
         None => match env::var(env_key) {
             Ok(value) => value,
             Err(_) => panic!("Missing environment variable: {env_key}"),
-        }
-    }
-}
-
-fn get_var_bool(yaml_value: Option<bool>, env_key: &str) -> bool {
-    match yaml_value {
-        Some(value) => value,
-        None => match env::var(env_key) {
-            Ok(value) => value.to_lowercase() == "true",
-            Err(_) => false,
         }
     }
 }

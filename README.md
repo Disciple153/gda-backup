@@ -17,11 +17,11 @@ services:
     environment:
       BACKUP_CRON: "* * * * *"
       POSTGRES_PASSWORD: password
+      BUCKET_NAME: my-bucket
+      DYNAMO_TABLE: my-table
       AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
       AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
       AWS_DEFAULT_REGION: us-east-1
-    configs:
-      - gda_backup_config
     networks:
       - gda_backup_network
     depends_on:
@@ -44,18 +44,6 @@ volumes:
 
 networks:
   gda_backup_network:
-
-configs:
-  gda_backup_config:
-    content: |
-      dry_run: true
-      log_level: debug
-      target_dir: /backup
-      bucket_name: my-bucket
-      dynamo_table: my-table
-      filters:
-        - ".txt$"
-      min_storage_duration: 1
 ```
 
 ### Environment variables
@@ -79,25 +67,6 @@ configs:
 | AWS_ACCESS_KEY_ID:     | yes      |            | The AWS access key id used to access S3 and DynamoDB.                                                   |
 | AWS_SECRET_ACCESS_KEY: | yes      |            | The AWS secret access key used to access S3 and DynamoDB.                                               |
 | AWS_DEFAULT_REGION:    | yes      |            | The AWS region containing your S3 bucket and DynamoDB table.                                            |
-
-### gda_backup_config file
-
-The gda_backup_config file is not required, and is largely redundant to environment variables, but it enables more than one filter to be set, and you may find it to be a little more convenient.
-
-| Variable             | Required | Default    | Description                                                                                             |
-| -------------------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------- |
-| target_dir           | no       | "/backup"  | The directory targeted by automatic backups.                                                            |
-| filters              | no       |            | A list of regular expressions used to filter files out of backups.                                      |
-| dry_run              | no       | false      | Set dry run to true to view the list of files that would be backed up without uploading anything.       |
-| log_level            | no       | "info"     | Set to "debug" for more verbose logs, or "quiet" to only display errors.                                |
-| db_engine            | no       | "postgres" | The engine of the local database. (Only postgres is supported.)                                         |
-| postgres_user        | no       | "postgres" | The username of the postgres database.                                                                  |
-| postgres_password    | yes      |            | The password to the postgres database.                                                                  |
-| postgres_host        | no       | "database" | The hostname of the postgres database. This should be the name of the postgres container.               |
-| postgres_db          | no       | "postgres" | The name of the postgres database.                                                                      |
-| min_storage_duration | no       |            | The length of time after an object is created before it will be deleted by S3 lifecycle configurations. |
-| bucket_name          | yes      |            | The S3 bucket to which backups will be uploaded.                                                        |
-| dynamo_table         | yes      |            | The DynamoDB table which will store backup related metadata.                                            |
 
 ### Restore
 
