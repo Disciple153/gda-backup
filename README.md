@@ -104,7 +104,7 @@ The gda_backup_config file is not required, and is largely redundant to environm
 To restore your backups to a file, run the following command:
 
 ```bash
-docker exec gda-backup-gda_backup-1 gda_backup restore \
+docker exec gda_backup gda_backup restore \
     --target-dir "/restore" \
     --bucket-name "my-bucket" \
     --dynamo-table "my-table"
