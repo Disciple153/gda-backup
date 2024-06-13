@@ -67,6 +67,18 @@ networks:
 | AWS_ACCESS_KEY_ID:     | yes      |            | The AWS access key id used to access S3 and DynamoDB.                                                   |
 | AWS_SECRET_ACCESS_KEY: | yes      |            | The AWS secret access key used to access S3 and DynamoDB.                                               |
 | AWS_DEFAULT_REGION:    | yes      |            | The AWS region containing your S3 bucket and DynamoDB table.                                            |
+| NTFY_URL:              | no       |            | The URL of the ntfy server gda_backup will publish to.                                                  |
+| NTFY_TOPIC:            | no       |            | The ntfy topic gda_backup will publish to.                                                              |
+| NTFY_USERNAME:         | no       |            | The ntfy user gda_backup will use to publish messages.                                                  |
+| NTFY_PASSWORD:         | no       |            | The password of the ntfy user gda_backup will use.                                                      |
+
+### Unscheduled Backup
+
+To perform a backup outside of the cron job, run the following command:
+
+```bash
+docker exec gda_backup gda_backup backup
+```
 
 ### Restore
 
@@ -83,6 +95,8 @@ docker exec gda_backup gda_backup restore \
 | Note: Restoring files from any tier of S3 Glacier comes with an additional cost. To minimize mistakes and charges, it is recommended that you use the AWS CLI to restore your archive to a regular S3 bucket before restoring your files.
 
 ### Terraform
+
+If you are using terraform, you can deploy gda_backup and all required AWS resources using the provided [terraform stack](./gda-backup.tf).
 
 ## Command line
 
@@ -124,10 +138,37 @@ cargo run -- help
 gda_backup help
 ```
 
-## AWS Role
+## AWS Resources
 
-Here is a role which will enable all features of GDA Backup.
-You can remove permissions to ensure certain actions are not possible.
+GDA Backup requires an S3 bucket and a DynamoDB table to operate as well as an IAM Role to access those resources.
+
+### S3 Bucket
+
+The bucket you create should have these settings:
+
+- Versioning: enabled
+  - This ensures that objects are not overwritten before the minimum storage duration has elapsed.
+- Lifecycle_policies
+  - Move objects to a cheaper storage tier.
+  - Delete non-current objects.
+    - Make sure that `noncurrent days` is set to a value greater than the minimum storage duration for the storage class you are using. (For Glacier Deep archive, this is 180 days)
+
+### DynamoDB table
+
+The DynamoDB table you create should have these settings:
+
+- Hash value:
+  - Name: `hash`
+  - Type: `S`
+- Billing mode:
+  - `PAY_PER_REQUEST` aka Serverless
+- Table class
+  - Standard is recommended for the initial backup.
+  - Switch to Standard-IA after the initial backup is complete.
+
+### IAM Role
+
+This role which will enables all features of GDA Backup.
 
 ```json
 {
@@ -156,6 +197,31 @@ You can remove permissions to ensure certain actions are not possible.
         "dynamodb:PutItem",
         "dynamodb:Scan"
       ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:387145356314:table/my-table",
+        "arn:aws:dynamodb:us-east-1:387145356314:table/my-table/index/hash"
+      ]
+    }
+  ]
+}
+```
+
+This role which will only enables the backup feature.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3Actions",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:RestoreObject"],
+      "Resource": ["arn:aws:s3:::my-bucket/*", "arn:aws:s3:::my-bucket"]
+    },
+    {
+      "Sid": "DynamoDbActions",
+      "Effect": "Allow",
+      "Action": ["dynamodb:DeleteItem", "dynamodb:GetItem", "dynamodb:PutItem"],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:387145356314:table/my-table",
         "arn:aws:dynamodb:us-east-1:387145356314:table/my-table/index/hash"
