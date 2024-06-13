@@ -67,6 +67,10 @@ networks:
 | AWS_ACCESS_KEY_ID:     | yes      |            | The AWS access key id used to access S3 and DynamoDB.                                                   |
 | AWS_SECRET_ACCESS_KEY: | yes      |            | The AWS secret access key used to access S3 and DynamoDB.                                               |
 | AWS_DEFAULT_REGION:    | yes      |            | The AWS region containing your S3 bucket and DynamoDB table.                                            |
+| NTFY_URL:              | no       |            | The URL of your ntfy server.                                                                            |
+| NTFY_TOPIC:            | no       |            | The ntfy topic gda_backup will publish to.                                                              |
+| NTFY_USERNAME:         | no       |            | The ntfy user gda_backup will use to publish messages.                                                  |
+| NTFY_PASSWORD:         | no       |            | The password of the ntfy user gda_backup will use.                                                      |
 
 ### Unscheduled Backup
 
@@ -141,6 +145,7 @@ GDA Backup requires an S3 bucket and a DynamoDB table to operate as well as an I
 ### S3 Bucket
 
 The bucket you create should have these settings:
+
 - Versioning: enabled
   - This ensures that objects are not overwritten before the minimum storage duration has elapsed.
 - Lifecycle_policies
@@ -151,9 +156,10 @@ The bucket you create should have these settings:
 ### DynamoDB table
 
 The DynamoDB table you create should have these settings:
+
 - Hash value:
   - Name: `hash`
-  - Type: `S` 
+  - Type: `S`
 - Billing mode:
   - `PAY_PER_REQUEST` aka Serverless
 - Table class
@@ -209,21 +215,13 @@ This role which will only enables the backup feature.
     {
       "Sid": "S3Actions",
       "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:RestoreObject"
-      ],
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:RestoreObject"],
       "Resource": ["arn:aws:s3:::my-bucket/*", "arn:aws:s3:::my-bucket"]
     },
     {
       "Sid": "DynamoDbActions",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:DeleteItem",
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-      ],
+      "Action": ["dynamodb:DeleteItem", "dynamodb:GetItem", "dynamodb:PutItem"],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:387145356314:table/my-table",
         "arn:aws:dynamodb:us-east-1:387145356314:table/my-table/index/hash"
@@ -231,3 +229,4 @@ This role which will only enables the backup feature.
     }
   ]
 }
+```
