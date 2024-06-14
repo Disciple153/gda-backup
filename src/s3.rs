@@ -60,8 +60,10 @@ use log::info;
 // Use multipart upload if file is greater than 100 Mib
 const MULTIPART_UPLOAD_THRESHOLD: u64 = 1024 * 1024 * 100;
 //In bytes, minimum chunk size of 5MiB. Increase CHUNK_SIZE to send larger chunks.
-const CHUNK_SIZE: u64 = 1024 * 1024 * 5;
+const MIN_CHUNK_SIZE: u64 = 1024 * 1024 * 5;
 const MAX_CHUNKS: u64 = 10000;
+//Set max S3 object size to 5TiB
+const MAX_S3_OBJECT_SIZE: u64 = 1024 * 1024 * 1024 * 1024 * 5;
 
 #[derive(Error, Debug)]
 pub enum S3GetError {
@@ -203,18 +205,29 @@ pub async fn put_multipart(aws_args: AwsArgs, client: &Client, key: String, file
 
     let upload_id = multipart_upload_res.upload_id().unwrap();
 
-    let mut chunk_count = (file_size / CHUNK_SIZE) + 1;
-    let mut size_of_last_chunk = file_size % CHUNK_SIZE;
-    if size_of_last_chunk == 0 {
-        size_of_last_chunk = CHUNK_SIZE;
-        chunk_count -= 1;
-    };
+    let mut chunk_size = MIN_CHUNK_SIZE;
+    let mut chunk_count = MAX_CHUNKS + 1;
+    let mut size_of_last_chunk= 0;
 
-    if chunk_count > MAX_CHUNKS {
-        Err(
-            IoError::new(ErrorKind::InvalidData, 
-            format!("File too large. Increase CHUNK_SIZE constant to upload larger files: {}", file_path.clone()))
-        )?;
+    while chunk_count > MAX_CHUNKS {
+
+        chunk_count = (file_size / MIN_CHUNK_SIZE) + 1;
+        size_of_last_chunk = file_size % MIN_CHUNK_SIZE;
+        if size_of_last_chunk == 0 {
+            size_of_last_chunk = MIN_CHUNK_SIZE;
+            chunk_count -= 1;
+        };
+    
+        if chunk_count * chunk_size > MAX_S3_OBJECT_SIZE {
+            Err(
+                IoError::new(ErrorKind::InvalidData, 
+                format!("File too large. Max S3 object size is 5TiB: {}", file_path.clone()))
+            )?;
+        };
+
+        if chunk_count > MAX_CHUNKS {
+            chunk_size *= 2;
+        };
     };
 
     let mut upload_parts: Vec<CompletedPart> = Vec::new();
@@ -223,11 +236,11 @@ pub async fn put_multipart(aws_args: AwsArgs, client: &Client, key: String, file
         let this_chunk = if chunk_count - 1 == chunk_index {
             size_of_last_chunk
         } else {
-            CHUNK_SIZE
+            MIN_CHUNK_SIZE
         };
         let stream = ByteStream::read_from()
             .path(file_path.clone())
-            .offset(chunk_index * CHUNK_SIZE)
+            .offset(chunk_index * MIN_CHUNK_SIZE)
             .length(Length::Exact(this_chunk))
             .build()
             .await
