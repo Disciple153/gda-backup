@@ -1,17 +1,22 @@
 name: Actions
 
 on:
+  push:
+    branches: ["main"]
   pull_request:
     branches: ["main"]
+
+concurrency: 
+  group: ${{ github.head_ref ||  github.ref }}
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  RELEASE_TAG: ${{ (github.event.pull_request.merged == true) && 'latest' || 'prerelease' }}
+  RELEASE_TAG: ${{ (github.event_name == 'push') && 'latest' || 'prerelease' }}
 
 jobs:
   generate-version:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
 
@@ -27,9 +32,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         PRERELEASE: true
         DEFAULT_BUMP: patch
-
-    - name: Print tag
-      run: echo  ${{ steps.tagger.outputs.tag }}
 
     outputs:
       version_tag: ${{ steps.tagger.outputs.tag }}
@@ -69,7 +71,6 @@ jobs:
       run: cargo test --verbose
 
   rust-release:
-
     runs-on: ubuntu-latest
     needs: generate-version
 
@@ -97,13 +98,14 @@ jobs:
         name: ${{ needs.generate-version.outputs.version_tag }}
         tag: ${{ needs.generate-version.outputs.version_tag }}
         body: ${{ github.event.pull_request.title }}
-        prerelease: ${{ github.event.pull_request.merged == false }}
+        prerelease: ${{ github.event_name == 'pull_request' }}
 
   docker-test:
     runs-on: ubuntu-latest
     permissions: write-all
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -150,6 +152,7 @@ jobs:
       id-token: write
 
     steps:
+      
       - name: Checkout repository
         uses: actions/checkout@v4
 
