@@ -13,7 +13,7 @@ The simplest way to use gda-backup is to run it in a docker container.
 ```yml
 services:
   gda_backup:
-    image: disciple153/gda-backup:0.0.1
+    image: ghcr.io/disciple153/gda-backup:0.0.1
     environment:
       BACKUP_CRON: "* * * * *"
       POSTGRES_PASSWORD: password
