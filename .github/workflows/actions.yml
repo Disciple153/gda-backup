@@ -29,7 +29,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         PRERELEASE: true
-        DEFAULT_BUMP: minor
+        DEFAULT_BUMP: patch
     - name: Print tag
       run: echo  ${{ steps.tagger.outputs.tag }}
 
