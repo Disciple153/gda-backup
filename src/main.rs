@@ -169,9 +169,11 @@ async fn backup(cli: Cli, mut args: BackupArgs, dispatcher: Option<Dispatcher>, 
     let conn: &mut PgConnection = &mut establish_connection(args.clone().into());
     
     // Clear local_state from database
+    info!("Preparing to back up: Cleaning up previous backup data...");
     clear_local_state(conn);
     
     // Load files into database from disk
+    info!("Preparing to back up: Loading all files...");
     backup::load(args.clone(), conn);
     
     // If glacier_state is empty, populate it from Glacier.
@@ -184,6 +186,7 @@ async fn backup(cli: Cli, mut args: BackupArgs, dispatcher: Option<Dispatcher>, 
     let (successes, failures) = backup::backup(cli.clone(), args.clone(), conn, s3_client, dynamo_client).await;
     
     // CLEAR STATE 
+    info!("Backup complete: Cleaning up...");
     clear_local_state(conn);
 
     // PRINT RESULTS
