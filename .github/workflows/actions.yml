@@ -126,7 +126,7 @@ jobs:
           docker compose up -d
 
           # Wait for backup to trigger.
-          sleep 65
+          sleep 90
 
           # Get backup logs
           output=$(docker logs gda-backup-gda_backup-1)

@@ -1,6 +1,6 @@
 # gda-backup
 
-GDA Backup is a cloud backup solution which is optimized for AWS S3 Glacier Deep Archive in order to be the least expensive disaster recovery solution.
+GDA Backup is a cloud backup solution which is optimized for AWS S3 Glacier Deep Archive in order to be the most cost effective disaster recovery solution.
 GDA Backup works by gathering all changed files, computing their hashes, and uploading only one object for every hash.
 This enables minimum uploads to S3, and by storing metadata in DynamoDB, expensive describe and list API calls to S3 glacier are eliminated.
 
@@ -13,7 +13,7 @@ The simplest way to use gda-backup is to run it in a docker container.
 ```yml
 services:
   gda_backup:
-    image: ghcr.io/disciple153/gda-backup:0.0.1
+    image: ghcr.io/disciple153/gda-backup:latest
     environment:
       BACKUP_CRON: "* * * * *"
       POSTGRES_PASSWORD: password
@@ -168,7 +168,7 @@ The DynamoDB table you create should have these settings:
 
 ### IAM Role
 
-This role which will enables all features of GDA Backup.
+This role enables all features of GDA Backup.
 
 ```json
 {
@@ -206,7 +206,7 @@ This role which will enables all features of GDA Backup.
 }
 ```
 
-This role which will only enables the backup feature.
+This role only enables the backup feature.
 
 ```json
 {
@@ -215,13 +215,24 @@ This role which will only enables the backup feature.
     {
       "Sid": "S3Actions",
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject", "s3:RestoreObject"],
-      "Resource": ["arn:aws:s3:::my-bucket/*", "arn:aws:s3:::my-bucket"]
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:RestoreObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::my-bucket/*",
+        "arn:aws:s3:::my-bucket"
+      ]
     },
     {
       "Sid": "DynamoDbActions",
       "Effect": "Allow",
-      "Action": ["dynamodb:DeleteItem", "dynamodb:GetItem", "dynamodb:PutItem"],
+      "Action": [
+        "dynamodb:DeleteItem",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem"
+      ],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:387145356314:table/my-table",
         "arn:aws:dynamodb:us-east-1:387145356314:table/my-table/index/hash"
