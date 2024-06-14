@@ -70,7 +70,6 @@ jobs:
           echo Dry run succeeded!
   
   deploy:
-    if: false
     runs-on: ubuntu-latest
     permissions: write-all
 
