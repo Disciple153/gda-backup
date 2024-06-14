@@ -97,7 +97,7 @@ jobs:
         name: ${{ needs.generate-version.outputs.version_tag }}
         tag: ${{ needs.generate-version.outputs.version_tag }}
         body: ${{ github.event.pull_request.title }}
-        prerelease: ${{ github.event.pull_request.merged == true }}
+        prerelease: ${{ github.event.pull_request.merged == false }}
 
   docker-test:
     runs-on: ubuntu-latest
