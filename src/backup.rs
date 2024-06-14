@@ -12,9 +12,7 @@ use crate::s3;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_dynamodb::Client as DynamoClient;
 use chrono::{
-    DateTime,
-    Duration,
-    Utc,
+    DateTime, Duration, Utc
 };
 use diesel::prelude::PgConnection;
 
@@ -122,7 +120,7 @@ pub fn load(args: BackupArgs, conn: &mut PgConnection) {
             }
 
             if filtered {
-                info!("File filtered out of tracked files: {file_path}");
+                debug!("File filtered out of tracked files: {file_path}");
                 continue;
             }
     
@@ -133,7 +131,7 @@ pub fn load(args: BackupArgs, conn: &mut PgConnection) {
 
             match result {
                 Ok(_) => (),
-                Err(error) => error!("Failed to load file into local database: {:?}\n Error: {}", file, error),
+                Err(error) => error!("Failed to load file into local database: {:?}\n Error: {:?}", file, error),
             }
         }
     }
@@ -273,7 +271,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
                     match s3::delete(args.clone().into(), s3_client, hash.clone()).await {
                         Ok(_) => (),
                         Err(error) => {
-                            error!("Failed to delete file from S3: {:?}\n Error: {}", hash_tracker_change, error);
+                            error!("Failed to delete file from S3: {:?}\n Error: {:?}", hash_tracker_change, error);
                             failures += 1;
                             continue;
                         }
@@ -297,7 +295,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
                     match s3::put(args.clone().into(), s3_client, hash.clone(), g_file.file_path.to_string()).await {
                         Ok(_) => (),
                         Err(error) => {
-                            error!("Failed to upload file to S3: {:?}\n Error: {}", hash_tracker_change, error);
+                            error!("Failed to upload file to S3: {:?}\n Error: {:?}", hash_tracker_change, error);
                             failures += 1;
                             continue;
                         }
@@ -312,7 +310,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
                     match s3::restore(args.clone().into(), s3_client, hash.clone()).await {
                         Ok(_) => (),
                         Err(error) => {
-                            error!("Failed to remove delete marker from file in S3: {:?}\n Error: {}", hash_tracker_change, error);
+                            error!("Failed to remove delete marker from file in S3: {:?}\n Error: {:?}", hash_tracker_change, error);
                             failures += 1;
                             continue;
                         }
@@ -326,7 +324,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
             match hash_tracker_change.new.update(args.clone().into(), dynamo_client).await {
                 Ok(_) => (),
                 Err(error) => {
-                    error!("Failed to upload hash tracker to DynamoDB: {:?}\n Error: {}", hash_tracker_change, error);
+                    error!("Failed to upload hash tracker to DynamoDB: {:?}\n Error: {:?}", hash_tracker_change, error);
                     failures += 1;
                     continue;
                 }
@@ -340,7 +338,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
                 match d_file.delete(conn) {
                     Ok(_) => info!("Deleted: {}", d_file.file_path),
                     Err(error) => {
-                        error!("Failed to remove file from local database: {:?}\n Error: {}", d_file, error);
+                        error!("Failed to remove file from local database: {:?}\n Error: {:?}", d_file, error);
                         failures += 1;
                         continue;
                     }
@@ -355,7 +353,7 @@ pub async fn backup(cli: Cli, args: BackupArgs, conn: &mut PgConnection, s3_clie
                 match c_file.insert(conn) {
                     Ok(_) => info!("Uploaded: {}", c_file.file_path),
                     Err(error) => {
-                        error!("Failed to insert/update file into local database: {:?}\n Error: {}", c_file, error);
+                        error!("Failed to insert/update file into local database: {:?}\n Error: {:?}", c_file, error);
                         failures += 1;
                         continue;
                     }
@@ -425,22 +423,29 @@ async fn get_hash_tracker_change<'a>(args: BackupArgs, dynamo_client: &DynamoCli
     hash_tracker_changes.get_mut(&hash).unwrap()
 }
 
-/// The function `new_expiration` calculates a new expiration date based on the
-/// current time and a minimum storage duration in Rust.
+/// The function `new_expiration` calculates a new expiration date based on a
+/// minimum storage duration provided as an input.
 /// 
 /// Arguments:
 /// 
-/// * `min_storage_duration`: The `min_storage_duration` parameter in the
-/// `new_expiration` function represents the minimum duration in days for which an
-/// item should be stored before it expires. This value is used to calculate the
-/// expiration time by adding the specified number of days to the current time.
+/// * `min_storage_duration`: The `min_storage_duration` parameter is an optional
+/// integer value representing the minimum storage duration in days. If a value is
+/// provided, the function will calculate the new expiration date by adding the
+/// specified number of days to the current date and time. If no value is provided
+/// (i.e., `None`
 /// 
 /// Returns:
 /// 
-/// A `DateTime<Utc>` value is being returned. The function `new_expiration`
-/// calculates a new expiration time based on the current time (`Utc::now()`) and a
-/// minimum storage duration provided as input.
-fn new_expiration(min_storage_duration: i64) -> DateTime<Utc> {
+/// The function `new_expiration` returns a `DateTime<Utc>` value.
+fn new_expiration(min_storage_duration: Option<i64>) -> DateTime<Utc> {
+
+    let min_storage_duration = match min_storage_duration {
+        Some(value) => value,
+        None => {
+            return DateTime::<Utc>::MAX_UTC;
+        },
+    };
+
     match Utc::now().checked_add_signed(Duration::days(min_storage_duration)) {
         Some(time) => time,
         None => DateTime::UNIX_EPOCH,

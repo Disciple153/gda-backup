@@ -1,4 +1,5 @@
-FROM rust:latest
+## Build gda_backup
+FROM rust:latest as builder
 LABEL maintainer="c_eps@yahoo.com"
 
 # Install dependencies
@@ -15,10 +16,17 @@ COPY src src
 # Build gda_backup
 RUN cargo build --release
 
-RUN apt-get install -y cron
+## Build Minimal Container
+FROM rust:latest
+WORKDIR "/gda_backup"
+COPY --from=builder /gda_backup/target/release/gda_backup /gda_backup/gda_backup
+COPY diesel.toml diesel.toml
+COPY migrations migrations
 
-# RUN apk update
-# RUN apk add busybox-openrc
+# Install dependencies
+RUN apt-get update
+RUN apt-get install -y cron
+RUN curl --proto '=https' --tlsv1.2 -LsSf https://github.com/diesel-rs/diesel/releases/download/v2.2.0/diesel_cli-installer.sh | sh
 
 # Copy other files
 COPY LICENSE LICENSE
@@ -32,7 +40,7 @@ ENV POSTGRES_HOST=database
 ENV POSTGRES_USER=postgres
 ENV POSTGRES_DB=postgres
 ENV TARGET_DIR="/backup"
-ENV PATH="${PATH}:/gda_backup/target/release"
+ENV PATH="${PATH}:/gda_backup"
 
 # Start
 CMD ["./docker/start.sh"]
