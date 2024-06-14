@@ -1,9 +1,27 @@
 use std::collections::hash_set::Iter as SetIter;
 use std::{
-    collections::HashMap, fs::{self, File, create_dir_all}, io::{Error as IoError, Write}, path::Path, time::SystemTime
+    collections::HashMap,
+    fs::{
+        self,
+        File,
+        create_dir_all
+    }, 
+    io::{
+        Error as IoError,
+        Write,
+        ErrorKind
+    },
+    path::Path,
+    time::SystemTime,
 };
 use aws_sdk_s3::operation::list_object_versions::ListObjectVersionsError;
-use aws_sdk_s3::types::{Delete, ObjectIdentifier};
+use aws_sdk_s3::operation::upload_part::UploadPartError;
+use aws_sdk_s3::types::{
+    CompletedMultipartUpload,
+    CompletedPart,
+    Delete,
+    ObjectIdentifier
+};
 use aws_sdk_s3::{
     error::SdkError,
     operation::{
@@ -13,10 +31,11 @@ use aws_sdk_s3::{
         }, get_object::GetObjectError, list_objects_v2::{
             ListObjectsV2Error, 
             ListObjectsV2Output
-        }, put_object::{
-            PutObjectError,
-            PutObjectOutput
-        }, restore_object::{RestoreObjectError, RestoreObjectOutput}
+        }, put_object::PutObjectError,
+        restore_object::{
+            RestoreObjectError,
+            RestoreObjectOutput
+        }
     },
     primitives::ByteStream,
     Client,
@@ -24,14 +43,27 @@ use aws_sdk_s3::{
 use aws_smithy_runtime_api::http::Response;
 use aws_sdk_s3::primitives::SdkBody;
 use aws_smithy_types::byte_stream::error::Error as AwsSmithyError;
+use aws_smithy_runtime_api::client::result::SdkError as AwsSmithySdkError;
+use aws_smithy_types::byte_stream::Length;
 
 use crate::aws;
-use crate::environment::{AwsArgs, Cli};
+use crate::environment::{
+    AwsArgs,
+    Cli
+};
 use thiserror::Error;
 
 use aws_sdk_s3::error::BuildError;
 use aws_sdk_s3::operation::delete_objects::DeleteObjectsError;
 use log::info;
+
+// Use multipart upload if file is greater than 100 Mib
+const MULTIPART_UPLOAD_THRESHOLD: u64 = 1024 * 1024 * 100;
+//In bytes, minimum chunk size of 5MiB. Increase CHUNK_SIZE to send larger chunks.
+const MIN_CHUNK_SIZE: u64 = 1024 * 1024 * 5;
+const MAX_CHUNKS: u64 = 10000;
+//Set max S3 object size to 5TiB
+const MAX_S3_OBJECT_SIZE: u64 = 1024 * 1024 * 1024 * 1024 * 5;
 
 #[derive(Error, Debug)]
 pub enum S3GetError {
@@ -58,6 +90,18 @@ pub enum S3DeleteError {
 
     #[error("S3BuildError")]
     S3BuildError(#[from] BuildError),
+}
+
+#[derive(Error, Debug)]
+pub enum S3PutError {
+    #[error("S3PutObjectError")]
+    S3PutObjectError(#[from] AwsSmithySdkError<PutObjectError, Response>),
+
+    #[error("PutError")]
+    PutError(#[from] IoError),
+
+    #[error("S3PutUploadPartError")]
+    S3PutUploadPartError(#[from] AwsSmithySdkError<UploadPartError, Response>),
 }
 
 /// The function `get_client` asynchronously retrieves a client using AWS
@@ -97,16 +141,145 @@ pub async fn get_client() -> Client {
 /// 
 /// The `put` function returns a `Result` containing either a `PutObjectOutput` or
 /// an `SdkError` with a `PutObjectError`.
-pub async fn put(aws_args: AwsArgs, client: &Client, key: String, file_path: String) -> Result<PutObjectOutput, SdkError<PutObjectError>> {
+pub async fn put(aws_args: AwsArgs, client: &Client, key: String, file_path: String) -> Result<(), S3PutError> {
+
+    let file_size = tokio::fs::metadata(file_path.clone()).await?.len();
+
+    if file_size > MULTIPART_UPLOAD_THRESHOLD {
+        return put_multipart(aws_args, client, key, file_path.clone(), file_size).await;
+    }
 
     let body = ByteStream::from_path(Path::new(&file_path)).await;
+
     client
         .put_object()
         .bucket(aws_args.bucket_name)
         .key(key)
         .body(body.unwrap())
         .send()
+        .await?;
+
+    Ok(())
+}
+
+
+/// The function `put_multipart` in Rust uploads a file in multiple parts to an AWS
+/// S3 bucket.
+/// 
+/// Arguments:
+/// 
+/// * `aws_args`: - `AwsArgs`: A struct containing AWS credentials and bucket name.
+/// * `client`: The `client` parameter in the function `put_multipart` is an
+/// instance of the AWS S3 client that is used to interact with the AWS S3 service.
+/// It is used to perform operations like creating a multipart upload, uploading
+/// parts of a file, and completing the multipart upload.
+/// * `key`: The `key` parameter in the `put_multipart` function represents the
+/// unique identifier or name of the object you are uploading to the S3 bucket. It
+/// is typically a string that specifies the path or name under which the object
+/// will be stored in the bucket.
+/// * `file_path`: The `file_path` parameter in the `put_multipart` function
+/// represents the path to the file that you want to upload to an AWS S3 bucket in
+/// multiple parts. It is a string that specifies the location of the file on your
+/// local system. For example, it could be something like "/
+/// * `file_size`: The `file_size` parameter in the `put_multipart` function
+/// represents the size of the file that is being uploaded in bytes. It is used to
+/// determine the number of chunks the file will be split into for multipart
+/// uploading.
+/// 
+/// Returns:
+/// 
+/// The `put_multipart` function returns a `Result<(), S3PutError>`. This means that
+/// it returns a `Result` type where the success case contains an empty tuple `()`
+/// and the error case contains an `S3PutError`.
+/// 
+/// https://github.com/awsdocs/aws-doc-sdk-examples/blob/main/rustv1/examples/s3/src/bin/s3-multipart-upload.rs#L136
+pub async fn put_multipart(aws_args: AwsArgs, client: &Client, key: String, file_path: String, file_size: u64) -> Result<(), S3PutError> {
+
+    let multipart_upload_res = client
+        .create_multipart_upload()
+        .bucket(&aws_args.bucket_name)
+        .key(&key)
+        .send()
         .await
+        .unwrap();
+
+    let upload_id = multipart_upload_res.upload_id().unwrap();
+
+    let mut chunk_size = MIN_CHUNK_SIZE;
+    let mut chunk_count = MAX_CHUNKS + 1;
+    let mut size_of_last_chunk= 0;
+
+    while chunk_count > MAX_CHUNKS {
+
+        chunk_count = (file_size / MIN_CHUNK_SIZE) + 1;
+        size_of_last_chunk = file_size % MIN_CHUNK_SIZE;
+        if size_of_last_chunk == 0 {
+            size_of_last_chunk = MIN_CHUNK_SIZE;
+            chunk_count -= 1;
+        };
+    
+        if chunk_count * chunk_size > MAX_S3_OBJECT_SIZE {
+            Err(
+                IoError::new(ErrorKind::InvalidData, 
+                format!("File too large. Max S3 object size is 5TiB: {}", file_path.clone()))
+            )?;
+        };
+
+        if chunk_count > MAX_CHUNKS {
+            chunk_size *= 2;
+        };
+    };
+
+    let mut upload_parts: Vec<CompletedPart> = Vec::new();
+
+    for chunk_index in 0..chunk_count {
+        let this_chunk = if chunk_count - 1 == chunk_index {
+            size_of_last_chunk
+        } else {
+            MIN_CHUNK_SIZE
+        };
+        let stream = ByteStream::read_from()
+            .path(file_path.clone())
+            .offset(chunk_index * MIN_CHUNK_SIZE)
+            .length(Length::Exact(this_chunk))
+            .build()
+            .await
+            .unwrap();
+        //Chunk index needs to start at 0, but part numbers start at 1.
+        let part_number = (chunk_index as i32) + 1;
+        // snippet-start:[rust.example_code.s3.upload_part]
+        let upload_part_res = client
+            .upload_part()
+            .key(&key)
+            .bucket(&aws_args.bucket_name)
+            .upload_id(upload_id)
+            .body(stream)
+            .part_number(part_number)
+            .send()
+            .await?;
+        upload_parts.push(
+            CompletedPart::builder()
+                .e_tag(upload_part_res.e_tag.unwrap_or_default())
+                .part_number(part_number)
+                .build(),
+        );
+    };
+
+    let completed_multipart_upload = CompletedMultipartUpload::builder()
+        .set_parts(Some(upload_parts))
+        .build();
+
+    let _complete_multipart_upload_res = client
+        .complete_multipart_upload()
+        .bucket(aws_args.bucket_name)
+        .key(key)
+        .multipart_upload(completed_multipart_upload)
+        .upload_id(upload_id)
+        .send()
+        .await
+        .unwrap();
+
+    Ok(())
 }
 
 /// The function `delete` deletes an object from a specified bucket using the AWS
