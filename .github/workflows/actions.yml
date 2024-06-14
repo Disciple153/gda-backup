@@ -99,6 +99,7 @@ jobs:
         tag: ${{ needs.generate-version.outputs.version_tag }}
         body: ${{ github.event.pull_request.title }}
         prerelease: ${{ github.event_name == 'pull_request' }}
+        makeLatest: ${{ github.event_name == 'push' }}
 
   docker-test:
     runs-on: ubuntu-latest
