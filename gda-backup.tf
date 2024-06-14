@@ -150,7 +150,7 @@ resource "aws_iam_access_key" "gda_backup_access_key" {
 # IMAGES
 
 resource "docker_image" "gda_backup" {
-  name = "disciple153/gda-backup:latest"
+  name = "ghcr.io/disciple153/gda-backup:latest"
 }
 
 resource "docker_image" "gda_backup_postgres" {

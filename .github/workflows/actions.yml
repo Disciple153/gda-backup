@@ -6,12 +6,6 @@ name: Docker
 # documentation.
 
 on:
-  schedule:
-    - cron: "37 5 * * *"
-  push:
-    branches: ["main"]
-    # Publish semver tags as releases.
-    tags: ["v*.*.*"]
   pull_request:
     branches: ["main"]
 
@@ -21,10 +15,92 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  generate-version:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
 
-  test:
+    steps:
+    - name: Bump version and push tag
+      id: tagger
+      uses: anothrNick/github-tag-action@1.66.0
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PRERELEASE: true
+        DEFAULT_BUMP: minor
+    - name: Print tag
+      run: echo  ${{ steps.tagger.outputs.tag }}
+
+    outputs:
+      version_tag: ${{ steps.tagger.outputs.tag }}
+
+  rust-test:
+    runs-on: ubuntu-latest
+    if: false
+
+    services:
+      # Label used to access the service container
+      postgres:
+        # Docker Hub image
+        image: postgres
+        # Provide the password for postgres
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        ports:
+          # Maps tcp port 5432 on service container to the host
+          - 5432:5432
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE }}
+        aws-region: ${{ vars.AWS_REGION }}
+        role-session-name: GitHub-OIDC-gda-backup
+    - name: Install diesel
+      run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/diesel-rs/diesel/releases/download/v2.2.0/diesel_cli-installer.sh | sh
+    - name: Initialize database
+      run: diesel migration run --database-url postgres://postgres:${{ secrets.POSTGRES_PASSWORD }}@localhost/postgres
+    - name: Run tests
+      run: cargo test --verbose
+
+  rust-release:
+
+    runs-on: ubuntu-latest
+    needs: generate-version
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Build
+      run: cargo build --release
+
+    - name: Prepare release
+      run: |
+        mkdir -p ./release
+        cp ./target/release/gda_backup ./release/gda_backup
+        cp ./diesel.toml ./release/diesel.toml
+        cp -r ./migrations ./release/migrations
+        cd release
+        zip -r9 ../gda_backup.zip *
+
+    - name: Deploy release
+      uses: ncipollo/release-action@v1
+      if: github.event.pull_request.merged == true
+      with:
+        artifacts: gda_backup.zip
+        name: ${{ needs.generate-version.outputs.version_tag }}
+        tag: ${{ needs.generate-version.outputs.version_tag }}
+        body: ${{ github.event.pull_request.title }}
+
+  docker-test:
     runs-on: ubuntu-latest
     permissions: write-all
+    if: false
 
     steps:
       - name: Checkout repository
@@ -39,7 +115,7 @@ jobs:
       - name: Build docker image
         run: |
           # Build docker image.
-          docker build -t disciple153/gda-backup:latest .
+          docker build -t ghcr.io/disciple153/gda-backup:latest .
 
       - name: Test docker image
         run: |
@@ -69,9 +145,14 @@ jobs:
 
           echo Dry run succeeded!
   
-  deploy:
+  docker-release:
     runs-on: ubuntu-latest
-    permissions: write-all
+    needs: generate-version
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
 
     steps:
       - name: Checkout repository
@@ -80,7 +161,7 @@ jobs:
       # Install the cosign tool except on PR
       # https://github.com/sigstore/cosign-installer
       - name: Install cosign
-        if: ${{ github.event_name != 'pull_request' }}
+        if: github.event.pull_request.merged == true
         uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20 #v3.5.0
         with:
           cosign-release: "v2.2.4"
@@ -94,12 +175,12 @@ jobs:
       # Login against a Docker registry except on PR
       # https://github.com/docker/login-action
       - name: Log into registry ${{ env.REGISTRY }}
-        if: ${{ github.event_name != 'pull_request' }}
+        if: github.event.pull_request.merged == true
         uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+          password: ${{ secrets.GHCR_TOKEN }}
 
       # Extract metadata (tags, labels) for Docker
       # https://github.com/docker/metadata-action
@@ -108,11 +189,19 @@ jobs:
         uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 # v5.0.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            ${{ needs.generate-version.outputs.version_tag }}
+            latest
+      
+      - name: Print tags
+        run: |
+          echo Tags: ${{ steps.meta.outputs.tags }}
+          echo Labels: ${{ steps.meta.outputs.labels }}
 
       # Build and push Docker image with Buildx (don't push on PR)
       # https://github.com/docker/build-push-action
       - name: Build and push Docker image
-        if: ${{ github.event_name != 'pull_request' }}
+        if: github.event.pull_request.merged == true
         id: build-and-push
         uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5.0.0
         with:
@@ -129,7 +218,7 @@ jobs:
       # transparency data even for private images, pass --force to cosign below.
       # https://github.com/sigstore/cosign
       - name: Sign the published Docker image
-        if: ${{ github.event_name != 'pull_request' }}
+        if: github.event.pull_request.merged == true
         env:
           # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-an-intermediate-environment-variable
           TAGS: ${{ steps.meta.outputs.tags }}

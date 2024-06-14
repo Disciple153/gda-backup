@@ -1,6 +1,6 @@
 services:
   gda_backup:
-    image: disciple153/gda-backup:latest
+    image: ghcr.io/disciple153/gda-backup:latest
     environment:
       DRY_RUN: true
       BACKUP_CRON: "* * * * *"
