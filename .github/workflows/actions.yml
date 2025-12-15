@@ -122,15 +122,34 @@ jobs:
           touch ./backup_test/test.txt
           touch ./backup_test/test.md
 
-          # Run compose file.
-          docker compose up -d
+          # Run compose file and capture any immediate failures
+          if ! docker compose up -d; then
+            echo "Docker compose failed. Checking container logs:"
+            docker logs gda-backup-database-1 2>&1 || echo "No database logs available"
+            docker logs gda-backup-gda_backup-1 2>&1 || echo "No gda_backup logs available"
+            docker compose down
+            exit 1
+          fi
 
-          # Wait for backup to trigger.
-          sleep 90
+          # Wait a moment for containers to stabilize
+          sleep 10
 
-          # Get backup logs
-          output=$(docker logs gda-backup-gda_backup-1)
-          echo $output
+          # Check container status
+          echo "Container status:"
+          docker ps -a
+
+          # Show logs from both containers
+          echo "Database logs:"
+          docker logs gda-backup-database-1 2>&1 || echo "No database logs"
+          echo "GDA Backup logs:"
+          docker logs gda-backup-gda_backup-1 2>&1 || echo "No gda_backup logs"
+
+          # Wait for backup to trigger
+          sleep 80
+
+          # Get final backup logs
+          output=$(docker logs gda-backup-gda_backup-1 2>&1)
+          echo "Final backup output: $output"
 
           # Tear down docker containers
           docker compose down
