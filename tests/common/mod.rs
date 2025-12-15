@@ -1,4 +1,4 @@
-use assert_cmd::Command;
+use assert_cmd::cargo;
 use std::{env, fs};
 use std::io::{Error, Write};
 
@@ -16,7 +16,7 @@ pub fn setup() {
 
     let _ = fs::remove_dir_all(TEST_DIR);
 
-    let mut clear_local_db = Command::cargo_bin("gda_backup").unwrap();
+    let mut clear_local_db = cargo::cargo_bin_cmd!("gda_backup");
     let assert = clear_local_db
         .arg("clear-database")
         .args(&["--db-engine", DB_ENGINE])
@@ -28,7 +28,7 @@ pub fn setup() {
 
     assert.success();
 
-    let mut delete_backup = Command::cargo_bin("gda_backup").unwrap();
+    let mut delete_backup = cargo::cargo_bin_cmd!("gda_backup");
     let assert = delete_backup
         .arg("delete-backup")
         .args(&["--bucket-name", "disciple153-test"])
