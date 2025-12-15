@@ -125,12 +125,24 @@ jobs:
           # Run compose file.
           docker compose up -d
 
+          # Check if database container started successfully
+          if ! docker ps | grep -q gda-backup-database-1; then
+            echo "Database container failed to start. Checking logs:"
+            docker logs gda-backup-database-1 || echo "No logs available"
+            docker compose down
+            exit 1
+          fi
+
           # Wait for backup to trigger.
           sleep 90
 
           # Get backup logs
           output=$(docker logs gda-backup-gda_backup-1)
           echo $output
+
+          # Also show database logs for debugging
+          echo "Database logs:"
+          docker logs gda-backup-database-1
 
           # Tear down docker containers
           docker compose down
