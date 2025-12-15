@@ -1,5 +1,5 @@
-use assert_cmd::Command;
-use rand::{distributions::Alphanumeric, Rng};
+use assert_cmd::cargo;
+use rand::{distr::Alphanumeric, Rng};
 use std::{fs::{self}, path::Path};
 use serial_test::serial;
 
@@ -27,7 +27,7 @@ fn backup_test() {
     common::create_file(backup_test_file_2, backup_test_2);
     common::create_file(backup_test_file_3, backup_test_3);
 
-    let mut backup = Command::cargo_bin("gda_backup").unwrap();
+    let mut backup = cargo::cargo_bin_cmd!("gda_backup");
 
     let backup = backup
         .arg("backup")
@@ -41,7 +41,7 @@ fn backup_test() {
         .args(&["--postgres-db", common::POSTGRES_DB])
         .args(&["--min-storage-duration", "1"]);
 
-    let mut restore = Command::cargo_bin("gda_backup").unwrap();
+    let mut restore = cargo::cargo_bin_cmd!("gda_backup");
 
     let restore = restore
         .arg("restore")
@@ -93,7 +93,7 @@ fn backup_test_no_min_storage_duration() {
     common::create_file(backup_test_file_2, backup_test_2);
     common::create_file(backup_test_file_3, backup_test_3);
 
-    let mut backup = Command::cargo_bin("gda_backup").unwrap();
+    let mut backup = cargo::cargo_bin_cmd!("gda_backup");
 
     let backup = backup
         .arg("backup")
@@ -106,7 +106,7 @@ fn backup_test_no_min_storage_duration() {
         .args(&["--postgres-host", common::POSTGRES_HOST])
         .args(&["--postgres-db", common::POSTGRES_DB]);
 
-    let mut restore = Command::cargo_bin("gda_backup").unwrap();
+    let mut restore = cargo::cargo_bin_cmd!("gda_backup");
 
     let restore = restore
         .arg("restore")
@@ -156,7 +156,7 @@ fn regex_test() {
     common::create_file(backup_test_file_1, backup_test_1);
     common::create_file(backup_test_file_2, backup_test_2);
 
-    let mut backup = Command::cargo_bin("gda_backup").unwrap();
+    let mut backup = cargo::cargo_bin_cmd!("gda_backup");
 
     let backup = backup
         .arg("backup")
@@ -171,7 +171,7 @@ fn regex_test() {
         .args(&["--min-storage-duration", "1"])
         .args(&["--filter", r".txt$"]);
 
-    let mut restore = Command::cargo_bin("gda_backup").unwrap();
+    let mut restore = cargo::cargo_bin_cmd!("gda_backup");
 
     let restore = restore
         .arg("restore")
@@ -214,7 +214,7 @@ fn regex_test_env() {
     common::create_file(backup_test_file_1, backup_test_1);
     common::create_file(backup_test_file_2, backup_test_2);
 
-    let mut backup = Command::cargo_bin("gda_backup").unwrap();
+    let mut backup = cargo::cargo_bin_cmd!("gda_backup");
 
     let backup = backup
         .arg("backup")
@@ -230,7 +230,7 @@ fn regex_test_env() {
         .env("FILTER", r"asd:\.txt$")
         .env("FILTER_DELIMITER", ":");
 
-    let mut restore = Command::cargo_bin("gda_backup").unwrap();
+    let mut restore = cargo::cargo_bin_cmd!("gda_backup");
 
     let restore = restore
         .arg("restore")
@@ -273,7 +273,7 @@ fn regex_test_env_dry() {
     common::create_file(backup_test_file_1, backup_test_1);
     common::create_file(backup_test_file_2, backup_test_2);
 
-    let mut backup = Command::cargo_bin("gda_backup").unwrap();
+    let mut backup = cargo::cargo_bin_cmd!("gda_backup");
 
     let backup = backup
         .arg("backup")
@@ -290,7 +290,7 @@ fn regex_test_env_dry() {
         .env("FILTER", r"asd:\.txt$")
         .env("FILTER_DELIMITER", ":");
 
-    let mut restore = Command::cargo_bin("gda_backup").unwrap();
+    let mut restore = cargo::cargo_bin_cmd!("gda_backup");
 
     let restore = restore
         .arg("restore")
@@ -326,7 +326,7 @@ fn multipart_upload_test() {
 
     let backup_test_file = "test1.txt";
 
-    let backup_test: String = rand::thread_rng()
+    let backup_test: String = rand::rng()
         .sample_iter(&Alphanumeric)
         .take(1024 * 1024 * 500)
         .map(char::from)
@@ -334,7 +334,7 @@ fn multipart_upload_test() {
 
     common::create_file(backup_test_file, &backup_test);
 
-    let mut backup = Command::cargo_bin("gda_backup").unwrap();
+    let mut backup = cargo::cargo_bin_cmd!("gda_backup");
 
     let backup = backup
         .arg("backup")
@@ -348,7 +348,7 @@ fn multipart_upload_test() {
         .args(&["--postgres-db", common::POSTGRES_DB])
         .args(&["--min-storage-duration", "1"]);
 
-    let mut restore = Command::cargo_bin("gda_backup").unwrap();
+    let mut restore = cargo::cargo_bin_cmd!("gda_backup");
 
     let restore = restore
         .arg("restore")

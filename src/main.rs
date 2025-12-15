@@ -8,7 +8,7 @@ use diesel::prelude::PgConnection;
 use log::{LevelFilter, error, info};
 use env_logger::Builder;
 
-use ntfy::{Auth, Dispatcher, Payload, Priority};
+use ntfy::{Auth, Dispatcher, Payload, Priority, dispatcher};
 
 use gda_backup::environment::{
     AwsArgs, BackupArgs, CleanDynamoArgs, ClearDatabaseArgs, Cli, Commands, DeleteBackupArgs, RestoreArgs
@@ -154,7 +154,7 @@ fn fix_filter(args: BackupArgs) -> Vec<String> {
 /// Returns:
 /// 
 /// The `backup` function is returning a `Result<(), Error>`.
-async fn backup(cli: Cli, mut args: BackupArgs, dispatcher: Option<Dispatcher>, s3_client: &mut S3Client, dynamo_client: &mut DynamoClient) -> Result<(), Error> {
+async fn backup(cli: Cli, mut args: BackupArgs, dispatcher: Option<Dispatcher<dispatcher::Async>>, s3_client: &mut S3Client, dynamo_client: &mut DynamoClient) -> Result<(), Error> {
     
     // FIX ARGUMENTS
     args.target_dir = fix_target_dir(args.target_dir.clone())?;
@@ -377,7 +377,7 @@ async fn delete_backup(args: DeleteBackupArgs, s3_client: &mut S3Client, dynamo_
 /// importance or urgency of the notification. The priority can be set to different
 /// levels such as low, medium, high, or critical, depending on the system's
 /// requirements
-async fn ntfy(cli: Cli, dispatcher: Option<Dispatcher>, title: &str, message: String, priority: Priority) {
+async fn ntfy(cli: Cli, dispatcher: Option<Dispatcher<dispatcher::Async>>, title: &str, message: String, priority: Priority) {
     if let Some(dispatcher) = dispatcher {
         let result = dispatcher.send(&Payload::new(cli.ntfy_topic.unwrap())
             .message(message) // Add optional message
@@ -407,18 +407,18 @@ async fn ntfy(cli: Cli, dispatcher: Option<Dispatcher>, title: &str, message: St
 /// Otherwise, it creates a `Dispatcher` using the provided `ntfy_url` and
 /// optionally sets credentials if `ntfy_username` and `ntfy_password` are provided.
 /// Finally, it attempts
-fn ntfy_dispatcher(cli: Cli) -> Option<Dispatcher> {
+fn ntfy_dispatcher(cli: Cli) -> Option<Dispatcher<dispatcher::Async>> {
 
     if !cli.ntfy_topic.is_some() || !cli.ntfy_url.is_some() {
         info!("ntfy disabled. Missing url or topic.");
         return None;
     }
 
-    let mut dispatcher = Dispatcher::builder(cli.ntfy_url.unwrap());
+    let mut dispatcher = dispatcher::builder(cli.ntfy_url.unwrap());
 
     if cli.ntfy_username.is_some() && cli.ntfy_password.is_some() {
-        dispatcher = dispatcher.credentials(Auth::new(cli.ntfy_username.unwrap(), cli.ntfy_password.unwrap()))
+        dispatcher = dispatcher.credentials(Auth::credentials(cli.ntfy_username.unwrap(), cli.ntfy_password.unwrap()))
     };
 
-    dispatcher.build().ok()
+    dispatcher.build_async().ok()
 }
