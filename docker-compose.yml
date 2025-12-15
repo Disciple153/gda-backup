@@ -24,7 +24,7 @@ services:
     environment:
       POSTGRES_PASSWORD: password
     volumes:
-      - gda_backup_volume:/var/lib/postgresql/data
+      - gda_backup_volume:/var/lib/postgresql
     networks:
       - gda_backup_network
 
