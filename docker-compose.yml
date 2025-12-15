@@ -14,7 +14,8 @@ services:
     networks:
       - gda_backup_network
     depends_on:
-      - database
+      database:
+        condition: service_healthy
     volumes:
       - ./backup_test:/backup:ro
       - ./restore_test:/restore
@@ -27,6 +28,11 @@ services:
       - gda_backup_volume:/var/lib/postgresql/data
     networks:
       - gda_backup_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   gda_backup_volume:
